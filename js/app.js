@@ -1,5 +1,6 @@
 import {
-  PROFILES,
+  CONDITION_TIPS,
+  ROUTINE_SLOTS,
   SAMPLE_PRODUCTS,
   SKIN_CONDITIONS,
   SKIN_TYPES,
@@ -17,12 +18,14 @@ import {
 
 const STORAGE_KEYS = {
   settings: 'skincheck_settings_v1',
-  history: 'skincheck_history_v1'
+  history: 'skincheck_history_v1',
+  plan: 'skincheck_plan_v1'
 };
 
 const state = {
   settings: loadSettings(),
   history: loadHistory(),
+  plan: loadPlan(),
   currentPhoto: null, // { base64Data, mimeType, previewUrl }
   cameraStream: null,
   lastAnalysis: null,
@@ -34,16 +37,12 @@ function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.settings);
     const parsed = raw ? JSON.parse(raw) : {};
-    // Migration von altem activeProfile auf flexibles skinProfile
-    const defaultSkinProfile = parsed.activeProfile === 'partner'
-      ? { skinType: 'oily', conditions: ['seborrhoe', 'pih', 'curly_oily'] }
-      : { skinType: 'normal', conditions: ['psoriasis'] };
     const skinProfile = parsed.skinProfile && parsed.skinProfile.skinType
       ? {
           skinType: parsed.skinProfile.skinType,
           conditions: Array.isArray(parsed.skinProfile.conditions) ? parsed.skinProfile.conditions : []
         }
-      : defaultSkinProfile;
+      : { skinType: 'normal', conditions: [] };
     return {
       skinProfile,
       apiKey: parsed.apiKey || '',
@@ -51,7 +50,7 @@ function loadSettings() {
     };
   } catch {
     return {
-      skinProfile: { skinType: 'normal', conditions: ['psoriasis'] },
+      skinProfile: { skinType: 'normal', conditions: [] },
       apiKey: '',
       model: 'gemini-flash-latest'
     };
@@ -73,6 +72,19 @@ function loadHistory() {
 
 function saveHistory() {
   localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(state.history.slice(0, 40)));
+}
+
+function loadPlan() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.plan);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePlan() {
+  localStorage.setItem(STORAGE_KEYS.plan, JSON.stringify(state.plan));
 }
 
 function escapeHtml(str = '') {
@@ -98,17 +110,9 @@ document.addEventListener('DOMContentLoaded', () => {
   bindHistoryControls();
   bindSettingsControls();
   syncProfileUI();
-  renderPlan(getMatchingPlanId());
+  renderPlan();
   renderHistory();
 });
-
-function getMatchingPlanId() {
-  const sp = state.settings.skinProfile;
-  if (sp.skinType === 'oily' || sp.conditions.includes('seborrhoe') || sp.conditions.includes('curly_oily')) {
-    return sp.conditions.includes('psoriasis') ? 'alex' : 'partner';
-  }
-  return 'alex';
-}
 
 function initSkinProfileSelector() {
   const selectEl = document.getElementById('select-skin-type');
@@ -142,13 +146,14 @@ function initSkinProfileSelector() {
 function onSkinProfileChanged() {
   saveSettings();
   syncProfileUI();
-  renderPlan(getMatchingPlanId());
+  renderPlan();
   if (state.lastAnalysis) {
     const reanalyzed = analyzeInci({
       productName: state.lastAnalysis.productName,
       rawInci: state.lastAnalysis.rawInci,
       category: state.lastAnalysis.category,
       skinProfile: state.settings.skinProfile,
+      userPlan: state.plan,
       sourceUrl: state.lastAnalysis.sourceUrl
     });
     state.lastAnalysis = reanalyzed;
@@ -214,11 +219,6 @@ function syncProfileUI() {
     const isChecked = sp.conditions.includes(chip.dataset.condId);
     if (cb) cb.checked = isChecked;
     chip.classList.toggle('checked', isChecked);
-  });
-
-  const planId = getMatchingPlanId();
-  document.querySelectorAll('.segment-btn').forEach((b) => {
-    b.classList.toggle('active', b.dataset.planProfile === planId);
   });
 
   const apiHint = document.getElementById('photo-api-hint');
@@ -397,7 +397,8 @@ function bindScanControls() {
         url,
         apiKey: state.settings.apiKey,
         model: state.settings.model,
-        skinProfile: state.settings.skinProfile
+        skinProfile: state.settings.skinProfile,
+        userPlan: state.plan
       });
       runAnalysisAndRender({
         productName: extracted.productName,
@@ -431,7 +432,8 @@ function bindScanControls() {
           model: state.settings.model,
           productName: result.productName,
           rawInci: result.rawInci,
-          skinProfile: state.settings.skinProfile
+          skinProfile: state.settings.skinProfile,
+          userPlan: state.plan
         }).catch(() => '');
         if (aiText) {
           state.lastAiSummary = aiText;
@@ -469,6 +471,7 @@ function runAnalysisAndRender({ productName, rawInci, category = 'auto', sourceU
     rawInci,
     category,
     skinProfile: state.settings.skinProfile,
+    userPlan: state.plan,
     sourceUrl
   });
   state.lastAnalysis = analysis;
@@ -568,6 +571,10 @@ function renderResult(a, aiSummary = '') {
     ? `<div class="card"><h2>🤖 Personalisierte KI-Einschätzung</h2><div class="ai-box">${escapeHtml(aiSummary)}</div></div>`
     : '';
 
+  const slotOptionsHtml = ROUTINE_SLOTS.map(
+    (s) => `<option value="${s.id}" ${s.id === a.routinePlacement.slotId ? 'selected' : ''}>${escapeHtml(s.label)}</option>`
+  ).join('');
+
   container.innerHTML = `
     <div class="card">
       <div class="verdict-header">
@@ -587,11 +594,21 @@ function renderResult(a, aiSummary = '') {
       ${warningsHtml}
       ${reasonsHtml}
 
-      <h3>📋 Einordnung in den Pflegeplan (${escapeHtml(profileLabel)})</h3>
+      <h3>📋 Einordnung in deinen Pflegeplan</h3>
       <div class="routine-slot-box">
         <h4>${escapeHtml(a.routinePlacement.slot)}</h4>
         <p>${escapeHtml(a.routinePlacement.advice)}</p>
-        <p style="margin-top:6px; color: var(--text-muted);"><strong>Bestandsabgleich:</strong> ${escapeHtml(a.routinePlacement.existingMatch)}</p>
+        <p style="margin-top:6px; color: var(--text-muted);"><strong>Dein Pflegeplan:</strong> ${escapeHtml(a.routinePlacement.existingMatch)}</p>
+      </div>
+
+      <div class="add-plan-box">
+        <div class="add-plan-row">
+          <label class="field-label" for="add-plan-slot" style="margin-bottom:0;">Produkt in meinen Pflegeplan übernehmen</label>
+          <select id="add-plan-slot" class="text-input">${slotOptionsHtml}</select>
+          <input id="add-plan-note" type="text" class="text-input" placeholder="Eigene Notiz (optional, z. B. 2x/Woche abends)" />
+          <button id="btn-add-to-plan" class="btn btn-primary btn-full" type="button">➕ Zum Pflegeplan hinzufügen</button>
+          <p id="add-plan-feedback" class="hint-small" style="margin-top:0;"></p>
+        </div>
       </div>
     </div>
 
@@ -613,103 +630,157 @@ function renderResult(a, aiSummary = '') {
     </div>
   `;
 
+  document.getElementById('btn-add-to-plan').addEventListener('click', () => {
+    const slotId = document.getElementById('add-plan-slot').value;
+    const note = document.getElementById('add-plan-note').value.trim();
+    addAnalysisToPlan(a, slotId, note, aiSummary);
+    const slotLabel = ROUTINE_SLOTS.find((s) => s.id === slotId)?.label || slotId;
+    document.getElementById('add-plan-feedback').textContent = `✅ Gespeichert unter „${slotLabel}“!`;
+  });
+
   container.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+function addAnalysisToPlan(analysis, slotId, note = '', aiSummary = '') {
+  state.plan.push({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    slotId,
+    productName: analysis.productName,
+    category: analysis.category,
+    categoryLabel: analysis.categoryLabel,
+    rawInci: analysis.rawInci,
+    sourceUrl: analysis.sourceUrl || '',
+    score: analysis.score,
+    verdictCls: analysis.verdict.cls,
+    note,
+    aiSummary: aiSummary || '',
+    addedAt: new Date().toISOString()
+  });
+  savePlan();
+  renderPlan();
+}
+
 // ============================================================================
-// PFLEGEPLAN VIEW
+// PFLEGEPLAN VIEW (dynamisch vom Nutzer aus Scans befüllt)
 // ============================================================================
 function bindPlanControls() {
-  document.querySelectorAll('.segment-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const p = btn.dataset.planProfile;
-      document.querySelectorAll('.segment-btn').forEach((b) => b.classList.toggle('active', b === btn));
-      renderPlan(p);
-    });
+  document.getElementById('btn-clear-plan').addEventListener('click', () => {
+    if (!state.plan.length) return;
+    if (confirm('Alle Produkte aus deinem Pflegeplan entfernen?')) {
+      state.plan = [];
+      savePlan();
+      renderPlan();
+    }
   });
 }
 
-function renderPlan(profileId) {
+function renderPlan() {
   const container = document.getElementById('plan-content');
-  const p = PROFILES[profileId] || PROFILES.alex;
+  const sp = state.settings.skinProfile;
+  const profileLabel = formatSkinProfileLabel(sp);
 
-  let routineHtml = '';
-  if (profileId === 'alex') {
-    routineHtml = p.routines
-      .map(
-        (block) => `
+  // Dynamische Tipps passend zu den angehakten Besonderheiten
+  const activeTips = [];
+  (sp.conditions || []).forEach((cid) => {
+    if (CONDITION_TIPS[cid]) activeTips.push(...CONDITION_TIPS[cid]);
+  });
+
+  let html = `
+    <div class="card">
+      <h2>🧬 Aktives Hautprofil: ${escapeHtml(profileLabel)}</h2>
+      <p class="helper-text" style="margin-bottom:0;">
+        Dein Pflegeplan wird lokal auf deinem Gerät gespeichert. Scanne Produkte per <strong>Foto, Link oder INCI-Text</strong> und füge sie direkt dem passenden Pflegeschritt hinzu.
+      </p>
+    </div>
+  `;
+
+  if (!state.plan.length) {
+    html += `
       <div class="card">
-        <h2>${escapeHtml(block.title)}</h2>
-        ${block.steps
-          .map(
-            (s) => `
-          <div class="plan-step">
-            <div class="plan-step-title">${escapeHtml(s.step)}</div>
-            <div class="plan-step-product">${escapeHtml(s.product)}</div>
-            <div class="plan-step-desc">${escapeHtml(s.desc)}</div>
-          </div>`
-          )
-          .join('')}
-      </div>`
-      )
-      .join('');
+        <h2>📋 Noch keine Produkte im Pflegeplan</h2>
+        <p class="helper-text">
+          Wechsle zum Tab <strong>📷 Scanner</strong>, analysiere dein erstes Produkt (z. B. Reiniger, Serum, Creme oder LSF) und tippe im Ergebnis auf <strong>„➕ Zum Pflegeplan hinzufügen“</strong>.
+        </p>
+        <button id="btn-go-scan" class="btn btn-primary btn-full" type="button">📷 Erstes Produkt scannen</button>
+      </div>
+    `;
   } else {
-    routineHtml = `
+    // Nach Gruppen rendern
+    const groups = [...new Set(ROUTINE_SLOTS.map((s) => s.group))];
+    groups.forEach((groupName) => {
+      const groupSlotIds = ROUTINE_SLOTS.filter((s) => s.group === groupName).map((s) => s.id);
+      const items = state.plan.filter((item) => groupSlotIds.includes(item.slotId));
+      if (!items.length) return;
+
+      const itemsHtml = items
+        .map((item) => {
+          const slotLabel = ROUTINE_SLOTS.find((s) => s.id === item.slotId)?.label || '';
+          return `
+            <div class="plan-product-row">
+              <div class="plan-product-main" data-open-plan-id="${escapeHtml(item.id)}">
+                <div class="plan-step-title">${escapeHtml(slotLabel)}</div>
+                <div class="plan-step-product">${escapeHtml(item.productName)}</div>
+                ${item.note ? `<div class="plan-step-desc">📝 ${escapeHtml(item.note)}</div>` : ''}
+                <div class="hint-small" style="margin-top:2px;">Antippen für vollständige INCI-Analyse</div>
+              </div>
+              <div class="plan-product-actions">
+                <span class="pill ${escapeHtml(item.verdictCls || 'badge-info')}">${item.score}/100</span>
+                <button class="icon-btn" type="button" data-remove-plan-id="${escapeHtml(item.id)}" title="Entfernen">✕</button>
+              </div>
+            </div>`;
+        })
+        .join('');
+
+      html += `
+        <div class="card">
+          <h2>${escapeHtml(groupName)}</h2>
+          ${itemsHtml}
+        </div>`;
+    });
+  }
+
+  if (activeTips.length) {
+    html += `
       <div class="card">
-        <h2>📅 Wochenplan (Haut &amp; Locken CWC)</h2>
-        <table class="week-table">
-          <thead>
-            <tr><th>Tag</th><th>Morgens</th><th>Abends (Double Cleanse)</th><th>Haare</th></tr>
-          </thead>
-          <tbody>
-            ${p.weekPlan
-              .map(
-                (w) => `<tr><td><strong>${w.day}</strong></td><td>${escapeHtml(w.am)}</td><td>${escapeHtml(w.pm)}</td><td>${escapeHtml(w.hair)}</td></tr>`
-              )
-              .join('')}
-          </tbody>
-        </table>
+        <h2>🛡️ Pflegeregeln für dein Hautprofil</h2>
+        <ul class="rule-list">
+          ${activeTips.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}
+        </ul>
       </div>`;
   }
 
-  const rulesHtml = `
-    <div class="card">
-      <h2>🛡️ Goldene Regeln</h2>
-      <ul class="rule-list">
-        ${p.goldenRules.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}
-      </ul>
-    </div>`;
+  container.innerHTML = html;
 
-  const invHtml = `
-    <div class="card">
-      <h2>🧴 Produktbestand (${p.inventory.length})</h2>
-      ${p.inventory
-        .map(
-          (item) => `
-        <div class="inventory-item">
-          <div>
-            <strong>#${item.id} ${escapeHtml(item.name)}</strong>
-            <div class="hint-small" style="margin-top:2px;">${escapeHtml(item.slot)}</div>
-            <div class="hint-small" style="margin-top:2px;">${escapeHtml(item.key)}</div>
-          </div>
-          <div style="text-align:right; flex-shrink:0;">
-            <span class="pill ${item.status.includes('Reserve') || item.status.includes('Empfehlung') ? 'badge-info' : item.status.includes('Umwidmen') ? 'badge-warn' : 'badge-ok'}">${escapeHtml(item.status)}</span>
-            ${item.url ? `<div style="margin-top:4px;"><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Shop ↗</a></div>` : ''}
-          </div>
-        </div>`
-        )
-        .join('')}
-    </div>`;
+  const goScan = document.getElementById('btn-go-scan');
+  if (goScan) goScan.addEventListener('click', () => switchView('scan'));
 
-  container.innerHTML = `
-    <div class="card">
-      <h2>${escapeHtml(p.title)}</h2>
-      <p class="helper-text" style="margin-bottom:0;">${escapeHtml(p.summary)}</p>
-    </div>
-    ${routineHtml}
-    ${rulesHtml}
-    ${invHtml}
-  `;
+  container.querySelectorAll('[data-open-plan-id]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const item = state.plan.find((p) => p.id === el.dataset.openPlanId);
+      if (!item) return;
+      const reanalyzed = analyzeInci({
+        productName: item.productName,
+        rawInci: item.rawInci,
+        category: item.category || 'auto',
+        skinProfile: state.settings.skinProfile,
+        userPlan: state.plan,
+        sourceUrl: item.sourceUrl || ''
+      });
+      state.lastAnalysis = reanalyzed;
+      state.lastAiSummary = item.aiSummary || '';
+      switchView('scan');
+      renderResult(reanalyzed, item.aiSummary || '');
+    });
+  });
+
+  container.querySelectorAll('[data-remove-plan-id]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.plan = state.plan.filter((p) => p.id !== btn.dataset.removePlanId);
+      savePlan();
+      renderPlan();
+    });
+  });
 }
 
 // ============================================================================
@@ -736,7 +807,7 @@ function renderHistory() {
   container.innerHTML = state.history
     .map((h) => {
       const dt = new Date(h.timestamp).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-      const label = h.profileLabel || PROFILES[h.activeProfile]?.shortName || 'Normal';
+      const label = h.profileLabel || 'Normal';
       return `
         <div class="card history-card" data-history-id="${escapeHtml(h.id)}">
           <div style="min-width:0;">
@@ -757,6 +828,7 @@ function renderHistory() {
         rawInci: entry.rawInci,
         category: entry.category || 'auto',
         skinProfile: state.settings.skinProfile,
+        userPlan: state.plan,
         sourceUrl: entry.sourceUrl || ''
       });
       state.lastAnalysis = reanalyzed;

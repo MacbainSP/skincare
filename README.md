@@ -11,7 +11,7 @@ Installierbare Android Web-App (PWA) zum Analysieren von Kosmetik-Inhaltsstoffen
   - **Blender-Warnung** (z. B. Urea/Panthenol/Glycerin hinter der 1-%-Linie) & **Signalmolekül-Erkennung** (Ceramide, Cica, B12, Allantoin wirken auch ≤ 1 %).
   - **Positionsabhängige Alkohol-Regel** (Platz 1–6 = Red Flag, hinter 1-%-Anker = unkritisch) & **Echtes vs. falsches Duschöl**.
   - **5-Hauttypen-Matrix** + konkrete **Pflegeplan-Einordnung**.
-- **📋 Pflegeplan & Verlauf:** Hinterlegte Psoriasis- und Seborrhoe-/CWC-Routinen sowie lokaler Scan-Verlauf.
+- **📋 Persönlicher Pflegeplan & Verlauf:** Befülle deinen eigenen Pflegeplan direkt aus jedem Foto-, Link- oder INCI-Scan (gruppiert nach Morgens, Abends, Körper, Haare, SOS) – inkl. dynamischer Pflegeregeln passend zu deinem Hautprofil und lokalem Verlauf.
 
 ---
 

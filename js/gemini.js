@@ -1,4 +1,4 @@
-import { PROFILES, SKIN_TYPES, SKIN_CONDITIONS, formatSkinProfileLabel } from './data.js';
+import { ROUTINE_SLOTS, SKIN_TYPES, SKIN_CONDITIONS, formatSkinProfileLabel } from './data.js';
 
 function describeSkinProfile(skinProfile) {
   const label = formatSkinProfileLabel(skinProfile);
@@ -267,7 +267,7 @@ async function fetchPageTextViaCorsProxy(targetUrl) {
  * 2) Auf GitHub Pages / Handy über CORS-fähige Reader-Proxies (r.jina.ai / allorigins)
  * 3) Extraktion mit normalem Gemini generateContent (OHNE google_search-Tool, daher kein 429-Free-Tier-Limit!)
  */
-export async function extractFromUrl({ url, apiKey, model, skinProfile }) {
+export async function extractFromUrl({ url, apiKey, model, skinProfile, userPlan = [] }) {
   const trimmedUrl = (url || '').trim();
   if (!/^https?:\/\//i.test(trimmedUrl)) {
     throw new Error('Bitte gib eine gültige Produkt-URL ein (beginnend mit https://).');
@@ -295,7 +295,8 @@ export async function extractFromUrl({ url, apiKey, model, skinProfile }) {
           model,
           productName: proxyResult.productName,
           rawInci: proxyResult.rawInci,
-          skinProfile
+          skinProfile,
+          userPlan
         });
       } catch {
         // Deterministische Analyse reicht als Fallback
@@ -363,15 +364,17 @@ Antworte ausschließlich als JSON-Objekt:
 /**
  * Kurze, personalisierte KI-Zweitmeinung für ein bereits analysiertes Produkt.
  */
-export async function getAiSecondOpinion({ apiKey, model, productName, rawInci, skinProfile }) {
+export async function getAiSecondOpinion({ apiKey, model, productName, rawInci, skinProfile, userPlan = [] }) {
   if (!apiKey || !apiKey.trim()) return '';
-  const { label, details, condIds } = describeSkinProfile(skinProfile);
+  const { label, details } = describeSkinProfile(skinProfile);
 
   let inventorySection = '';
-  if (condIds.includes('psoriasis')) {
-    inventorySection = `\nVorhandener Psoriasis-Bestand:\n${PROFILES.alex.inventory.map((i) => `- ${i.name} (${i.slot})`).join('\n')}`;
-  } else if (condIds.includes('seborrhoe') || skinProfile?.skinType === 'oily') {
-    inventorySection = `\nRelevante dm-Routine:\n${PROFILES.partner.inventory.map((i) => `- ${i.name} (${i.slot})`).join('\n')}`;
+  if (userPlan && userPlan.length) {
+    const lines = userPlan.map((item) => {
+      const slotLabel = ROUTINE_SLOTS.find((s) => s.id === item.slotId)?.label || item.slotId;
+      return `- ${item.productName} (${slotLabel})`;
+    });
+    inventorySection = `\nBereits im persönlichen Pflegeplan gespeichert:\n${lines.join('\n')}`;
   }
 
   const prompt = `Du bist ein evidenzbasierter Dermokosmetik-Berater.
@@ -383,7 +386,7 @@ INCI-Liste: ${rawInci}
 
 Gib eine prägnante, praxisnahe Einschätzung in maximal 5 kurzen Sätzen auf Deutsch:
 1) Passt es zum gewählten Hautprofil (und falls nein, zu welchem Hauttyp eher)?
-2) Wo genau im Pflegeplan einsetzen – oder ist es durch den Bestand bereits abgedeckt?
+2) Wo genau im Pflegeplan einsetzen – und gibt es Überschneidungen oder Konflikte mit bereits gespeicherten Produkten?
 3) Gibt es eine wichtige Anwendungsregel (z. B. Kein-Brennen-Regel, Soak & Seal, CWC, LSF)?`;
 
   return callGemini({

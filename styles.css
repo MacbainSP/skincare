@@ -640,6 +640,65 @@ html, body {
   color: var(--text);
 }
 
+.add-plan-box {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px dashed var(--primary);
+}
+
+.add-plan-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-product-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.plan-product-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.plan-product-main {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.plan-product-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--text-muted);
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.icon-btn:hover {
+  color: var(--bad);
+  border-color: #F5C2C2;
+}
+
 /* INCI Breakdown List */
 .inci-list {
   display: flex;

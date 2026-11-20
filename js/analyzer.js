@@ -130,7 +130,8 @@ export function analyzeInci({
   productName = '',
   rawInci = '',
   category = 'auto',
-  skinProfile = { skinType: 'normal', conditions: ['psoriasis'] },
+  skinProfile = { skinType: 'normal', conditions: [] },
+  userPlan = [],
   sourceUrl = ''
 }) {
   const items = parseInciList(rawInci);
@@ -392,7 +393,8 @@ export function analyzeInci({
     conditions,
     detectedCategory,
     flags,
-    score
+    score,
+    userPlan
   });
 
   const verdict = scoreToVerdict(score);
@@ -472,147 +474,84 @@ function scoreToVerdict(score) {
   return { label: 'Lieber meiden', cls: 'badge-bad', emoji: '🚫' };
 }
 
-function buildRoutinePlacement({ skinType, conditions, detectedCategory, flags, score }) {
+function buildRoutinePlacement({ skinType, conditions, detectedCategory, flags, score, userPlan = [] }) {
   const hasCond = (c) => conditions.includes(c);
 
+  // Empfohlenen Standard-Slot bestimmen
+  let slotId = 'pm_care';
+  let slot = 'Abends – Nachtpflege / Creme';
+  let advice = 'Dünn auftragen und die Reaktion deiner Haut beobachten.';
+
+  if (detectedCategory === 'cleanser') {
+    slotId = 'am_cleanse';
+    slot = 'Morgens & Abends – Reinigung';
+    advice = 'Lauwarm reinigen und sanft trocken tupfen (nicht rubbeln).' + (skinType === 'oily' || hasCond('seborrhoe') ? ' Abends bei wasserfestem LSF ideal als 2. Schritt nach einem Reinigungsöl.' : '');
+  } else if (detectedCategory === 'shower_oil') {
+    slotId = 'body';
+    slot = 'Körper – Dusche';
+    advice = 'Lauwarm (35–37 °C) duschen und danach direkt innerhalb von 3 Minuten eincremen (Soak & Seal).';
+  } else if (detectedCategory === 'sunscreen') {
+    slotId = 'am_care';
+    slot = 'Morgens – UV-Schutz (letzter Schritt)';
+    advice = 'Großzügig auftragen (ca. 2 Fingerlängen fürs Gesicht).' + (skinType === 'oily' || hasCond('seborrhoe') ? ' Ersetzt morgens bei fettiger Haut die Tagescreme – abends gründlich abwaschen.' : ' Schützt zuverlässig vor UV-Triggern & Pigmentflecken.');
+  } else if (detectedCategory === 'serum') {
+    if (flags.keratolytic.length) {
+      slotId = 'pm_treatment';
+      slot = 'Abends – Wirkstoff-Serum / Spot-Treatment';
+      advice = 'Auf geschlossene Haut auftragen.' + (flags.stingTriggers.length ? ' Nicht auf offene oder gereizte Stellen geben (Brenn-Gefahr)!' : '');
+    } else {
+      slotId = 'am_serum';
+      slot = 'Morgens & Abends – Serum / Wirkstoff';
+      advice = '2–3 Tropfen auf die noch leicht feuchte Haut auftragen und danach mit Creme oder LSF einschließen.';
+    }
+  } else if (detectedCategory === 'exfoliant') {
+    slotId = 'pm_treatment';
+    slot = 'Abends – Chemisches Peeling (1–3x pro Woche)';
+    advice = 'Langsam einschleichen, nicht mit anderen starken Säuren/Urea am selben Abend kombinieren und morgens LSF 50 nutzen.';
+  } else if (detectedCategory === 'moisturizer') {
+    if (flags.heavyLipidHigh.length) {
+      slotId = 'pm_care';
+      slot = 'Abends – Reichhaltige Nachtpflege / Barriere-Creme';
+      advice = 'Ideal als schützender Abschluss abends oder im Winter über einem Serum.';
+    } else {
+      slotId = 'pm_care';
+      slot = 'Morgens (unter LSF) und/oder Abends – Gesichtscreme';
+      advice = 'Leichte Pflege nach dem Serum auftragen.';
+    }
+  } else if (detectedCategory === 'body_lotion') {
+    slotId = 'body';
+    slot = 'Körper – Tägliche Basistherapie (nach dem Duschen)';
+    advice = 'Direkt innerhalb von 3 Minuten nach dem Duschen auf die noch leicht feuchte Haut auftragen (Soak & Seal).';
+  } else if (detectedCategory === 'ointment') {
+    slotId = 'sos';
+    slot = 'Spezial- / SOS-Pflege (punktuell & über Nacht)';
+    advice = 'Versiegelt Feuchtigkeit auf trockenen, schuppigen oder rissigen Stellen („Slugging“).';
+  } else if (detectedCategory === 'shampoo') {
+    slotId = 'hair';
+    slot = 'Kopfhaut & Haare – Haarwäsche';
+    advice = hasCond('curly_oily')
+      ? 'Nur auf die Kopfhaut/den Ansatz geben (CWC-Methode: vorher trockene Spitzen mit Spülung schützen).'
+      : 'Sanft mit den Fingerkuppen einmassieren, nicht kratzen.';
+  } else if (detectedCategory === 'conditioner') {
+    slotId = 'hair';
+    slot = 'Haare – Längen & Spitzen';
+    advice = hasCond('curly_oily')
+      ? 'Strikt ab Ohrhöhe abwärts in die Längen & Spitzen geben – niemals an den fettigen Ansatz!'
+      : 'Nach dem Waschen in Längen und Spitzen einarbeiten.';
+  } else if (detectedCategory === 'lip_balm') {
+    slotId = 'sos';
+    slot = 'Lippenpflege (nach Bedarf)';
+    advice = 'Tagsüber und bei Sonne/Kälte zum Schutz der Lippenbarriere nutzen.';
+  }
+
   if (score < 55) {
-    return {
-      slot: 'Nicht für dein gewähltes Hautprofil empfohlen',
-      advice: 'Aufgrund der erkannten Reizstoffe oder unpassenden Textur lieber im Regal lassen (falls schon gekauft, höchstens an unempfindlichen Körperstellen aufbrauchen).',
-      existingMatch: hasCond('psoriasis')
-        ? 'Dein 14-Produkte-Psoriasis-Bestand deckt bereits alle Pflegeschritte reizfrei ab.'
-        : 'Prüfe im Tab „Pflegeplan“ passende Alternativen.'
-    };
+    advice = '⚠️ Für dein gewähltes Hautprofil wegen der erkannten Reizstoffe/Textur eher nicht empfohlen. ' + advice;
   }
 
-  // Spezifischer Bestandsabgleich für Psoriasis (Alex)
-  if (hasCond('psoriasis')) {
-    const alexMap = {
-      cleanser: {
-        slot: 'Gesicht AM/PM (Schritt 1) oder Körper-Dusche',
-        advice: 'Lauwarm reinigen, danach nur trocken tupfen (nicht rubbeln!) und innerhalb von 3 Minuten eincremen (Soak & Seal).',
-        existingMatch: 'Im Bestand: ISANA med Ultra Sensitiv Totes Meer Waschlotion (#4).'
-      },
-      shower_oil: {
-        slot: 'Körper-Dusche (besonders im Winter bei trockener Haut)',
-        advice: 'Lauwarm (35–37 °C) 5–10 Min. duschen, danach direkt innerhalb von 3 Min. eincremen.',
-        existingMatch: 'Im Bestand: ISANA med Totes Meer Waschlotion (#4) – echtes Duschöl (Öl auf Platz 1) ist ein gutes Winter-Upgrade.'
-      },
-      serum: {
-        slot: flags.keratolytic.length
-          ? 'Gesicht Abends (Spot auf geschlossene Schuppen/Bartansatz) & Plaque Schicht 1'
-          : 'Gesicht Morgens & Abends (Schritt 2 – ganzes Gesicht & Bartansatz)',
-        advice: flags.stingTriggers.length
-          ? 'Auf leicht feuchte, geschlossene Haut geben. Bei offenen Rissen/Rhagaden pausieren (Stinging-Gefahr)!'
-          : '2–3 Tropfen auf leicht feuchte Haut auftragen – stärkt die Barriere gegen den Koebner-Effekt.',
-        existingMatch: flags.keratolytic.length
-          ? 'Im Bestand: ISANA med 5% Urea Akut-Pflege Serum (#2).'
-          : 'Im Bestand: ISANA Calming Barrier Serum (#1).'
-      },
-      moisturizer: {
-        slot: flags.heavyLipidHigh.length
-          ? 'Gesicht Abends (Schritt 3 – Winter/Nacht) & brennfreie SOS-Pflege'
-          : 'Gesicht Abends (Schritt 3 – leichte Nachtpflege)',
-        advice: 'Erbsengroße Menge über dem Serum auftragen. Morgens unter deinem LSF-50-Fluid meist nicht extra nötig.',
-        existingMatch: 'Im Bestand: Balea med Gesichtscreme Ultra Sensitive (#12), Mixa Panthenol Comfort (#13) & Reserve ISANA med Panthenol Komfort (#14).'
-      },
-      sunscreen: {
-        slot: 'Gesicht Morgens (Schritt 3+4 als 2-in-1 Tagespflege + UV-Schutz)',
-        advice: 'Großzügig auftragen – verhindert Sonnenbrand-Trigger (Koebner-Effekt). Abends sanft abwaschen.',
-        existingMatch: 'Im Bestand: ISANA Anti-UV Tagesfluid LSF 50 (#3).'
-      },
-      body_lotion: {
-        slot: 'Körper täglich nach dem Duschen (Soak & Seal innerhalb von 3 Min.)',
-        advice: flags.stingTriggers.length
-          ? 'Ideal für geschlossene, schuppige Körperareale. Bei aufgekratzten Stellen auf brennfreie Pflege wechseln.'
-          : 'Perfekt für die tägliche Basistherapie – auch auf gereizter Haut brennfrei nutzbar.',
-        existingMatch: 'Im Bestand: ISANA med Barriereschutz Lotion (#5), Totes Meer Lotion (#6) & Mixa Panthenol Comfort (#13).'
-      },
-      ointment: {
-        slot: 'Plaque-Intensivpflege Abends/Nachts (Schicht 2 – Okklusion / „Slugging“)',
-        advice: 'Über dem 5% Urea Serum auf Ellbogen/Knie/Schienbeine auftragen – oder solo bei offenen, rissigen Herden.',
-        existingMatch: 'Im Bestand: ISANA med Totes Meer Salbe (#7) & Mixa Panthenol Comfort (#13 tagsüber).'
-      },
-      exfoliant: {
-        slot: 'Spezial-Behandlung bei dicken, geschlossenen Schuppenpanzern (2–3x/Woche abends)',
-        advice: 'Strikt nur auf geschlossene Plaques! Nicht mit Urea am selben Abend kombinieren. Danach versiegeln & morgens LSF 50 nutzen.',
-        existingMatch: 'Im Bestand: Neutrogena 2% BHA Waschgel (#11 als 3-Min-Dusch-Trick) / Nachkauf: ISANA 6% AHA.'
-      },
-      shampoo: {
-        slot: flags.soothing.some((s) => /piroctone/i.test(s))
-          ? 'Kopfhaut 2–3x/Woche bei Schuppung/Juckreiz (2–3 Min. einwirken lassen)'
-          : 'Kopfhaut Alltag (milde Wäsche an den Zwischentagen)',
-        advice: 'Mit den Fingerkuppen sanft einmassieren, niemals mit den Fingernägeln kratzen.',
-        existingMatch: 'Im Bestand: ISANA med Anti-Schuppen (#8), Ultra Sensitiv (#9) & pH 5,5 (#10).'
-      },
-      lip_balm: {
-        slot: 'Lippenpflege nach Bedarf (tagsüber / draußen)',
-        advice: 'Reizfreie Lippenpflege schützt vor Einrissen und UV-Stress an den Lippen.',
-        existingMatch: 'Gut kombinierbar mit deiner täglichen Routine.'
-      }
-    };
-    if (alexMap[detectedCategory]) return alexMap[detectedCategory];
-  }
+  const sameSlotItems = (userPlan || []).filter((p) => p.slotId === slotId);
+  const existingMatch = sameSlotItems.length
+    ? `In diesem Schritt hast du bereits gespeichert: ${sameSlotItems.map((p) => p.productName).join(', ')}.`
+    : 'Dieser Schritt ist in deinem persönlichen Pflegeplan noch frei – du kannst das Produkt unten direkt hinzufügen.';
 
-  // Spezifischer Plan für Fettige Haut / Seborrhoe / Locken
-  if (skinType === 'oily' || hasCond('seborrhoe') || hasCond('curly_oily')) {
-    const partnerMap = {
-      cleanser: {
-        slot: 'Gesicht Morgens & Abends (Schritt 2 im Double Cleansing)',
-        advice: 'Sanft 30 Sek. reinigen. Abends nach einem Reinigungsöl anwenden, um UV-Filter & Sebum zu lösen.',
-        existingMatch: 'dm-Plan: Balea MED Ultra Sensitive Waschgel.'
-      },
-      exfoliant: {
-        slot: 'Gesicht Abends (2–3x/Woche) + optional Kopfhaut Pre-Wash',
-        advice: 'Auf T-Zone/Poren auftragen, 5–10 Min. einwirken lassen, danach leichtes Creme-Gel.',
-        existingMatch: 'dm-Plan: Balea Beauty Expert Liquid Peeling 2% BHA.'
-      },
-      serum: {
-        slot: 'Gesicht Morgens täglich & Abends an BHA-freien Tagen',
-        advice: '3–4 Tropfen auf leicht feuchte Haut vor dem Sonnenschutz bzw. Creme-Gel.',
-        existingMatch: 'dm-Plan: Balea Beauty Expert Azelain Booster / Niacinamide Serum.'
-      },
-      sunscreen: {
-        slot: 'Gesicht Morgens – ALLEINIGE Tagespflege (keine Creme darunter!)',
-        advice: '2 Fingerlängen auftragen; schützt vor Sebum-Oxidation und Pickelmalen (PIH). Abends per Double Cleansing entfernen.',
-        existingMatch: 'dm-Plan: SUNDANCE 50+ Sensitiv Sonnenfluid.'
-      },
-      moisturizer: {
-        slot: 'Gesicht Abends (leichter Abschluss)',
-        advice: 'Erbsengroße Menge abends über dem Serum. Morgens unter LSF 50+ weglassen.',
-        existingMatch: 'dm-Plan: Balea Aqua Feuchtigkeits Creme-Gel.'
-      },
-      shampoo: {
-        slot: 'Haare Waschtag (alle 2–3 Tage) – CWC-Methode NUR auf die Kopfhaut!',
-        advice: 'Vorher trockene Spitzen mit Spülung schützen (C1), dann Shampoo nur am Ansatz einmassieren.',
-        existingMatch: 'dm-Plan: Balea Pure Frische ↔ Aqua Hyaluron Shampoo.'
-      },
-      conditioner: {
-        slot: 'Haare – strikt ab Ohrhöhe abwärts (Längen & trockene Spitzen)',
-        advice: 'Niemals an den fettigen Ansatz geben! Ideal für C1 (Spitzenschutz) & C2.',
-        existingMatch: 'dm-Plan: Balea Prof. Aqua Hyaluron Serie / Langhaarmädchen Lockengel.'
-      }
-    };
-    if (partnerMap[detectedCategory]) return partnerMap[detectedCategory];
-  }
-
-  // Allgemeine Pflegeplan-Zuordnung für alle anderen Kombinationen
-  const generalMap = {
-    cleanser: { slot: 'Morgens & Abends – Schritt 1 (Reinigung)', advice: 'Lauwarm reinigen und sanft trocken tupfen.', existingMatch: 'Basis-Schritt jeder Routine.' },
-    serum: { slot: 'Morgens und/oder Abends – Schritt 2 (Wirkstoff-Serum)', advice: 'Auf leicht feuchte Haut auftragen und danach mit Creme oder LSF einschließen.', existingMatch: 'Gezielte Wirkstoff-Ergänzung.' },
-    moisturizer: { slot: 'Morgens (unter LSF) und/oder Abends – Schritt 3 (Pflege)', advice: 'Je nach Hautgefühl dünn auftragen – bei trockener Haut ggf. abends etwas reichhaltiger.', existingMatch: 'Tägliche Barriere- und Feuchtigkeitspflege.' },
-    sunscreen: { slot: 'Morgens – letzter Schritt (UV-Schutz)', advice: 'Großzügig auftragen (ca. 2 Fingerlängen fürs Gesicht), abends gründlich abwaschen.', existingMatch: 'Wichtigster Schutz gegen Hautalterung, Rötungen & Pigmentflecken.' },
-    exfoliant: { slot: 'Abends – 1–3x pro Woche (Chemisches Peeling)', advice: 'Langsam einschleichen, nicht mit anderen Säuren kombinieren und tagsüber LSF 50 nutzen.', existingMatch: 'Aktiv-Behandlung nach Bedarf.' },
-    body_lotion: { slot: 'Körper – direkt nach dem Duschen (Soak & Seal)', advice: 'Auf noch leicht feuchter Haut eincremen, um Feuchtigkeit einzuschließen.', existingMatch: 'Tägliche Körper-Basistherapie.' },
-    ointment: { slot: 'Punktuell Abends / auf sehr trockenen Stellen', advice: 'Versiegelt Feuchtigkeit über Nacht und schützt rissige Areale.', existingMatch: 'Intensiv- & SOS-Pflege.' },
-    shampoo: { slot: 'Haarwäsche (Kopfhaut)', advice: 'Sanft mit den Fingerkuppen einmassieren und lauwarm ausspülen.', existingMatch: 'Kopfhautpflege.' },
-    conditioner: { slot: 'Haarlängen & Spitzen (nach dem Waschen)', advice: 'Nur in die Längen und Spitzen geben, Ansatz aussparen.', existingMatch: 'Haarpflege.' },
-    lip_balm: { slot: 'Lippenpflege nach Bedarf', advice: 'Mehrmals täglich und bei Sonne/Kälte anwenden.', existingMatch: 'Alltags-Schutz.' }
-  };
-
-  return generalMap[detectedCategory] || {
-    slot: 'Ergänzende Hautpflege (nach Bedarf)',
-    advice: 'Zuerst kleinflächig testen und gut beobachten, wie deine Haut reagiert.',
-    existingMatch: 'Individuelle Ergänzung.'
-  };
+  return { slotId, slot, advice, existingMatch };
 }
