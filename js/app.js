@@ -172,13 +172,16 @@ function applyLanguage() {
   });
 
   document.querySelectorAll('[data-i18n]').forEach((el) => {
-    el.textContent = t(lang, el.dataset.i18n);
+    const val = t(lang, el.dataset.i18n);
+    if (val !== el.dataset.i18n) el.textContent = val;
   });
   document.querySelectorAll('[data-i18n-html]').forEach((el) => {
-    el.innerHTML = t(lang, el.dataset.i18nHtml);
+    const val = t(lang, el.dataset.i18nHtml);
+    if (val !== el.dataset.i18nHtml) el.innerHTML = val;
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
-    el.placeholder = t(lang, el.dataset.i18nPlaceholder);
+    const val = t(lang, el.dataset.i18nPlaceholder);
+    if (val !== el.dataset.i18nPlaceholder) el.placeholder = val;
   });
 
   renderSkinProfileOptions();

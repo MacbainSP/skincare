@@ -1,4 +1,4 @@
-const CACHE_NAME = 'skincheck-pwa-v10';
+const CACHE_NAME = 'skincheck-pwa-v11';
 const ASSETS = [
   './',
   './index.html',
@@ -34,18 +34,17 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/') || url.hostname.includes('googleapis.com')) {
     return;
   }
+  // Network-First: online immer sofort die neueste Version (kein HTML/JS-Cache-Mismatch),
+  // offline sauberer Fallback auf den Cache.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request)
-        .then((response) => {
-          if (response && response.status === 200 && response.type === 'basic') {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || networkFetch;
-    })
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.status === 200 && response.type === 'basic') {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
