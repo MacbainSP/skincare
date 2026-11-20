@@ -297,8 +297,6 @@ function switchView(viewName) {
 
 function syncProfileUI() {
   const sp = state.settings.skinProfile;
-  const label = formatSkinProfileLabel(sp, state.settings.lang);
-  document.getElementById('header-profile-label').textContent = label;
 
   const selectEl = document.getElementById('select-skin-type');
   if (selectEl) selectEl.value = sp.skinType;

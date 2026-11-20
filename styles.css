@@ -50,17 +50,20 @@ html, body {
 
 /* Header */
 .app-header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
   background: var(--primary);
   color: #FFFFFF;
-  padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.header-top-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .header-left {
@@ -86,18 +89,16 @@ html, body {
 
 .app-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 700;
   line-height: 1.15;
 }
 
-.app-subtitle {
-  margin: 2px 0 0;
-  font-size: 12px;
-  opacity: 0.88;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.app-tagline {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  opacity: 0.92;
 }
 
 .profile-chip {

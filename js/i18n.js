@@ -5,6 +5,7 @@
 export const TRANSLATIONS = {
   de: {
     app_title: 'SkinCheck',
+    app_tagline: 'Installierbare Android Web-App (PWA) zum Analysieren von Kosmetik-Inhaltsstoffen (INCI) per Live-Kamera, Galerie-Foto, Produkt-Link oder INCI-Text – abgestimmt auf deinen gewählten Hauttyp, Hautzustände und Pflegeplan.',
     skin_profile_heading: '🧬 Hautprofil wählen',
     skin_type_label: 'Grund-Hauttyp',
     conditions_label: 'Besonderheiten / Hautzustände (optional, mehrfach wählbar)',
@@ -126,6 +127,7 @@ export const TRANSLATIONS = {
 
   en: {
     app_title: 'SkinCheck',
+    app_tagline: 'Installable Android Web App (PWA) for analyzing cosmetic ingredients (INCI) via live camera, gallery photo, product link, or INCI text – tailored to your selected skin type, skin conditions, and skincare routine.',
     skin_profile_heading: '🧬 Select Skin Profile',
     skin_type_label: 'Base Skin Type',
     conditions_label: 'Skin Conditions / Concerns (optional, multi-select)',

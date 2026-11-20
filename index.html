@@ -17,17 +17,19 @@
   <div id="app">
     <!-- Top App Bar -->
     <header class="app-header">
-      <div class="header-left">
-        <div class="brand-mark" aria-hidden="true">SC</div>
-        <div>
+      <div class="header-top-row">
+        <div class="header-left">
+          <div class="brand-mark" aria-hidden="true">SC</div>
           <h1 class="app-title" data-i18n="app_title">SkinCheck</h1>
-          <p class="app-subtitle" id="header-profile-label">Normal</p>
+        </div>
+        <div class="lang-switch" id="lang-switch" role="group" aria-label="Language">
+          <button class="lang-btn active" data-lang="de" type="button">DE</button>
+          <button class="lang-btn" data-lang="en" type="button">EN</button>
         </div>
       </div>
-      <div class="lang-switch" id="lang-switch" role="group" aria-label="Language">
-        <button class="lang-btn active" data-lang="de" type="button">DE</button>
-        <button class="lang-btn" data-lang="en" type="button">EN</button>
-      </div>
+      <p class="app-tagline" data-i18n="app_tagline">
+        Installierbare Android Web-App (PWA) zum Analysieren von Kosmetik-Inhaltsstoffen (INCI) per Live-Kamera, Galerie-Foto, Produkt-Link oder INCI-Text – abgestimmt auf deinen gewählten Hauttyp, Hautzustände und Pflegeplan.
+      </p>
     </header>
 
     <!-- Main Scrollable Content -->
