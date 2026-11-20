@@ -6,7 +6,7 @@ import {
   SKIN_TYPES,
   formatSkinProfileLabel
 } from './data.js';
-import { analyzeInci } from './analyzer.js';
+import { CATEGORY_LABELS, analyzeInci } from './analyzer.js';
 import {
   compressImageFile,
   extractFromPhoto,
@@ -15,6 +15,7 @@ import {
   listAvailableModels,
   testOrAutoSelectModel
 } from './gemini.js';
+import { pickLang, t } from './i18n.js';
 
 const STORAGE_KEYS = {
   settings: 'skincheck_settings_v1',
@@ -26,12 +27,17 @@ const state = {
   settings: loadSettings(),
   history: loadHistory(),
   plan: loadPlan(),
-  currentPhoto: null, // { base64Data, mimeType, previewUrl }
+  currentPhoto: null,
   cameraStream: null,
   lastAnalysis: null,
   lastAiSummary: '',
   deferredPrompt: null
 };
+
+function detectDefaultLang() {
+  const nav = (navigator.language || 'de').toLowerCase();
+  return nav.startsWith('de') ? 'de' : 'en';
+}
 
 function loadSettings() {
   try {
@@ -44,12 +50,14 @@ function loadSettings() {
         }
       : { skinType: 'normal', conditions: [] };
     return {
+      lang: parsed.lang === 'en' || parsed.lang === 'de' ? parsed.lang : detectDefaultLang(),
       skinProfile,
       apiKey: parsed.apiKey || '',
       model: parsed.model || 'gemini-flash-latest'
     };
   } catch {
     return {
+      lang: detectDefaultLang(),
       skinProfile: { skinType: 'normal', conditions: [] },
       apiKey: '',
       model: 'gemini-flash-latest'
@@ -87,6 +95,10 @@ function savePlan() {
   localStorage.setItem(STORAGE_KEYS.plan, JSON.stringify(state.plan));
 }
 
+function L(key, vars) {
+  return t(state.settings.lang, key, vars);
+}
+
 function escapeHtml(str = '') {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -102,64 +114,17 @@ function escapeHtml(str = '') {
 document.addEventListener('DOMContentLoaded', () => {
   registerServiceWorker();
   setupInstallPrompt();
+  bindLanguageSwitch();
   initSkinProfileSelector();
+  populateCategorySelect();
   bindNavigation();
   bindModeTabs();
   bindScanControls();
   bindPlanControls();
   bindHistoryControls();
   bindSettingsControls();
-  syncProfileUI();
-  renderPlan();
-  renderHistory();
+  applyLanguage();
 });
-
-function initSkinProfileSelector() {
-  const selectEl = document.getElementById('select-skin-type');
-  selectEl.innerHTML = SKIN_TYPES.map(
-    (st) => `<option value="${st.id}">${escapeHtml(st.label)} – ${escapeHtml(st.desc)}</option>`
-  ).join('');
-
-  const gridEl = document.getElementById('conditions-checkbox-grid');
-  gridEl.innerHTML = SKIN_CONDITIONS.map(
-    (c) => `
-      <label class="cond-chip" data-cond-id="${c.id}" title="${escapeHtml(c.desc)}">
-        <input type="checkbox" value="${c.id}" />
-        <span>${escapeHtml(c.short)}</span>
-      </label>`
-  ).join('');
-
-  selectEl.addEventListener('change', () => {
-    state.settings.skinProfile.skinType = selectEl.value;
-    onSkinProfileChanged();
-  });
-
-  gridEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      const checked = Array.from(gridEl.querySelectorAll('input[type="checkbox"]:checked')).map((i) => i.value);
-      state.settings.skinProfile.conditions = checked;
-      onSkinProfileChanged();
-    });
-  });
-}
-
-function onSkinProfileChanged() {
-  saveSettings();
-  syncProfileUI();
-  renderPlan();
-  if (state.lastAnalysis) {
-    const reanalyzed = analyzeInci({
-      productName: state.lastAnalysis.productName,
-      rawInci: state.lastAnalysis.rawInci,
-      category: state.lastAnalysis.category,
-      skinProfile: state.settings.skinProfile,
-      userPlan: state.plan,
-      sourceUrl: state.lastAnalysis.sourceUrl
-    });
-    state.lastAnalysis = reanalyzed;
-    renderResult(reanalyzed, state.lastAiSummary);
-  }
-}
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
@@ -184,13 +149,138 @@ function setupInstallPrompt() {
 }
 
 // ============================================================================
-// NAVIGATION & PROFILE SWITCH
+// LANGUAGE SWITCHING (DE / EN)
+// ============================================================================
+function bindLanguageSwitch() {
+  document.querySelectorAll('.lang-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const nextLang = btn.dataset.lang === 'en' ? 'en' : 'de';
+      if (state.settings.lang === nextLang) return;
+      state.settings.lang = nextLang;
+      saveSettings();
+      applyLanguage();
+    });
+  });
+}
+
+function applyLanguage() {
+  const lang = state.settings.lang;
+  document.documentElement.lang = lang;
+
+  document.querySelectorAll('.lang-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.lang === lang);
+  });
+
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(lang, el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-html]').forEach((el) => {
+    el.innerHTML = t(lang, el.dataset.i18nHtml);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+    el.placeholder = t(lang, el.dataset.i18nPlaceholder);
+  });
+
+  renderSkinProfileOptions();
+  populateCategorySelect();
+  syncProfileUI();
+  renderPlan();
+  renderHistory();
+
+  if (state.lastAnalysis) {
+    const reanalyzed = analyzeInci({
+      productName: state.lastAnalysis.productName,
+      rawInci: state.lastAnalysis.rawInci,
+      category: state.lastAnalysis.category,
+      skinProfile: state.settings.skinProfile,
+      userPlan: state.plan,
+      sourceUrl: state.lastAnalysis.sourceUrl,
+      lang
+    });
+    state.lastAnalysis = reanalyzed;
+    renderResult(reanalyzed, state.lastAiSummary, false);
+  }
+}
+
+function populateCategorySelect() {
+  const sel = document.getElementById('input-product-category');
+  if (!sel) return;
+  const current = sel.value || 'auto';
+  const lang = state.settings.lang;
+  const opts = [`<option value="auto">${escapeHtml(L('cat_auto'))}</option>`];
+  for (const [id, labels] of Object.entries(CATEGORY_LABELS)) {
+    opts.push(`<option value="${id}">${escapeHtml(pickLang(labels, lang))}</option>`);
+  }
+  sel.innerHTML = opts.join('');
+  sel.value = current;
+}
+
+// ============================================================================
+// SKIN PROFILE SELECTOR
+// ============================================================================
+function initSkinProfileSelector() {
+  const selectEl = document.getElementById('select-skin-type');
+  selectEl.addEventListener('change', () => {
+    state.settings.skinProfile.skinType = selectEl.value;
+    onSkinProfileChanged();
+  });
+}
+
+function renderSkinProfileOptions() {
+  const lang = state.settings.lang;
+  const sp = state.settings.skinProfile;
+
+  const selectEl = document.getElementById('select-skin-type');
+  selectEl.innerHTML = SKIN_TYPES.map(
+    (st) => `<option value="${st.id}">${escapeHtml(pickLang(st.label, lang))} – ${escapeHtml(pickLang(st.desc, lang))}</option>`
+  ).join('');
+  selectEl.value = sp.skinType;
+
+  const gridEl = document.getElementById('conditions-checkbox-grid');
+  gridEl.innerHTML = SKIN_CONDITIONS.map((c) => {
+    const isChecked = sp.conditions.includes(c.id);
+    return `
+      <label class="cond-chip ${isChecked ? 'checked' : ''}" data-cond-id="${c.id}" title="${escapeHtml(pickLang(c.desc, lang))}">
+        <input type="checkbox" value="${c.id}" ${isChecked ? 'checked' : ''} />
+        <span>${escapeHtml(pickLang(c.short, lang))}</span>
+      </label>`;
+  }).join('');
+
+  gridEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const checked = Array.from(gridEl.querySelectorAll('input[type="checkbox"]:checked')).map((i) => i.value);
+      state.settings.skinProfile.conditions = checked;
+      onSkinProfileChanged();
+    });
+  });
+}
+
+function onSkinProfileChanged() {
+  saveSettings();
+  syncProfileUI();
+  renderPlan();
+  if (state.lastAnalysis) {
+    const reanalyzed = analyzeInci({
+      productName: state.lastAnalysis.productName,
+      rawInci: state.lastAnalysis.rawInci,
+      category: state.lastAnalysis.category,
+      skinProfile: state.settings.skinProfile,
+      userPlan: state.plan,
+      sourceUrl: state.lastAnalysis.sourceUrl,
+      lang: state.settings.lang
+    });
+    state.lastAnalysis = reanalyzed;
+    renderResult(reanalyzed, state.lastAiSummary, false);
+  }
+}
+
+// ============================================================================
+// NAVIGATION
 // ============================================================================
 function bindNavigation() {
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const target = btn.dataset.view;
-      switchView(target);
+      switchView(btn.dataset.view);
     });
   });
 }
@@ -207,10 +297,9 @@ function switchView(viewName) {
 
 function syncProfileUI() {
   const sp = state.settings.skinProfile;
-  const label = formatSkinProfileLabel(sp);
+  const label = formatSkinProfileLabel(sp, state.settings.lang);
   document.getElementById('header-profile-label').textContent = label;
 
-  // Dropdown & Checkboxes synchronisieren
   const selectEl = document.getElementById('select-skin-type');
   if (selectEl) selectEl.value = sp.skinType;
 
@@ -223,14 +312,14 @@ function syncProfileUI() {
 
   const apiHint = document.getElementById('photo-api-hint');
   if (state.settings.apiKey) {
-    apiHint.textContent = `✅ Gemini API-Key aktiv (${state.settings.model}) – Foto-Scan & Link-Suche einsatzbereit.`;
+    apiHint.textContent = L('photo_api_active', { model: state.settings.model });
   } else {
-    apiHint.textContent = 'ℹ️ Für Foto-Scan bitte kostenlosen Gemini API-Key im Tab „Setup“ eintragen. Text-Analysen funktionieren auch komplett offline.';
+    apiHint.textContent = L('photo_api_missing');
   }
 }
 
 // ============================================================================
-// SCANNER CONTROLS
+// SCANNER & LIVE CAMERA
 // ============================================================================
 function bindModeTabs() {
   document.querySelectorAll('.mode-tab').forEach((tab) => {
@@ -275,9 +364,8 @@ async function openLiveCamera() {
     document.getElementById('photo-preview-wrap').classList.add('hidden');
     document.getElementById('camera-live-wrap').classList.remove('hidden');
   } catch (err) {
-    // Falls Kamera-Berechtigung blockiert oder kein HTTPS: Fallback auf System-Kamera
     if (err.name === 'NotAllowedError') {
-      showError('Kamera-Zugriff wurde blockiert. Bitte erlaube den Kamera-Zugriff in den Browser-Einstellungen oder wähle ein Foto über „Galerie“.');
+      showError(L('err_cam_denied'));
     } else {
       fallbackInput.click();
     }
@@ -286,7 +374,7 @@ async function openLiveCamera() {
 
 function stopLiveCamera() {
   if (state.cameraStream) {
-    state.cameraStream.getTracks().forEach((t) => t.stop());
+    state.cameraStream.getTracks().forEach((tr) => tr.stop());
     state.cameraStream = null;
   }
   const video = document.getElementById('camera-video');
@@ -298,7 +386,7 @@ function stopLiveCamera() {
 function captureLiveFrame() {
   const video = document.getElementById('camera-video');
   if (!video || !video.videoWidth || !video.videoHeight) {
-    showError('Kamera ist noch nicht bereit. Bitte einen Moment warten.');
+    showError(L('err_cam_not_ready'));
     return;
   }
   const maxDim = 1600;
@@ -333,7 +421,7 @@ function bindScanControls() {
     hideError();
     stopLiveCamera();
     try {
-      setLoading(true, 'Bereite Foto vor…');
+      setLoading(true, L('status_prepare_photo'));
       const compressed = await compressImageFile(file);
       state.currentPhoto = compressed;
       document.getElementById('photo-preview').src = compressed.previewUrl;
@@ -363,13 +451,14 @@ function bindScanControls() {
     if (!state.currentPhoto) return;
     hideError();
     try {
-      setLoading(true, 'Lese INCI-Liste per Gemini Vision aus…');
+      setLoading(true, L('status_read_photo'));
       const extracted = await extractFromPhoto({
         apiKey: state.settings.apiKey,
         model: state.settings.model,
         base64Data: state.currentPhoto.base64Data,
         mimeType: state.currentPhoto.mimeType,
-        skinProfile: state.settings.skinProfile
+        skinProfile: state.settings.skinProfile,
+        lang: state.settings.lang
       });
       runAnalysisAndRender({
         productName: extracted.productName,
@@ -387,18 +476,19 @@ function bindScanControls() {
   document.getElementById('btn-analyze-url').addEventListener('click', async () => {
     const url = document.getElementById('input-url').value.trim();
     if (!url) {
-      showError('Bitte füge zuerst einen Produkt-Link ein.');
+      showError(L('err_no_url'));
       return;
     }
     hideError();
     try {
-      setLoading(true, 'Lese Produktseite & INCI-Liste aus…');
+      setLoading(true, L('status_read_url'));
       const extracted = await extractFromUrl({
         url,
         apiKey: state.settings.apiKey,
         model: state.settings.model,
         skinProfile: state.settings.skinProfile,
-        userPlan: state.plan
+        userPlan: state.plan,
+        lang: state.settings.lang
       });
       runAnalysisAndRender({
         productName: extracted.productName,
@@ -420,24 +510,25 @@ function bindScanControls() {
     const rawInci = document.getElementById('input-inci').value.trim();
     hideError();
     if (!rawInci) {
-      showError('Bitte gib eine INCI-Liste ein.');
+      showError(L('err_no_inci'));
       return;
     }
     try {
       const result = runAnalysisAndRender({ productName, rawInci, category, aiSummary: '' });
       if (state.settings.apiKey) {
-        setLoading(true, 'Hole personalisierte KI-Zweitmeinung…');
+        setLoading(true, L('status_ai_opinion'));
         const aiText = await getAiSecondOpinion({
           apiKey: state.settings.apiKey,
           model: state.settings.model,
           productName: result.productName,
           rawInci: result.rawInci,
           skinProfile: state.settings.skinProfile,
-          userPlan: state.plan
+          userPlan: state.plan,
+          lang: state.settings.lang
         }).catch(() => '');
         if (aiText) {
           state.lastAiSummary = aiText;
-          renderResult(result, aiText);
+          renderResult(result, aiText, false);
           updateLatestHistoryAi(aiText);
         }
       }
@@ -452,11 +543,12 @@ function bindScanControls() {
     btn.addEventListener('click', () => {
       const sample = SAMPLE_PRODUCTS[btn.dataset.sample];
       if (!sample) return;
-      document.getElementById('input-product-name').value = sample.name;
+      const sampleName = pickLang(sample.name, state.settings.lang);
+      document.getElementById('input-product-name').value = sampleName;
       document.getElementById('input-product-category').value = sample.category;
       document.getElementById('input-inci').value = sample.inci;
       runAnalysisAndRender({
-        productName: sample.name,
+        productName: sampleName,
         rawInci: sample.inci,
         category: sample.category,
         aiSummary: ''
@@ -472,12 +564,12 @@ function runAnalysisAndRender({ productName, rawInci, category = 'auto', sourceU
     category,
     skinProfile: state.settings.skinProfile,
     userPlan: state.plan,
-    sourceUrl
+    sourceUrl,
+    lang: state.settings.lang
   });
   state.lastAnalysis = analysis;
   state.lastAiSummary = aiSummary;
 
-  // In Verlauf speichern
   state.history.unshift({
     id: Date.now().toString(36),
     productName: analysis.productName,
@@ -493,7 +585,7 @@ function runAnalysisAndRender({ productName, rawInci, category = 'auto', sourceU
   });
   saveHistory();
   renderHistory();
-  renderResult(analysis, aiSummary);
+  renderResult(analysis, aiSummary, true);
   return analysis;
 }
 
@@ -523,24 +615,25 @@ function hideError() {
 // ============================================================================
 // RESULT RENDERING
 // ============================================================================
-function renderResult(a, aiSummary = '') {
+function renderResult(a, aiSummary = '', shouldScroll = true) {
+  const lang = state.settings.lang;
   const container = document.getElementById('result-container');
   container.classList.remove('hidden');
 
-  const profileLabel = a.profileLabel || formatSkinProfileLabel(state.settings.skinProfile);
+  const profileLabel = a.profileLabel || formatSkinProfileLabel(state.settings.skinProfile, lang);
   const warningsHtml = a.warnings.length
-    ? `<div class="verdict-box ${a.score < 58 ? 'badge-bad' : 'badge-warn'}"><strong>⚠️ Wichtige Hinweise für dein Hautprofil (${escapeHtml(profileLabel)})</strong><ul class="bullet-list">${a.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul></div>`
-    : `<div class="verdict-box badge-ok"><strong>✅ Keine Red Flags für dein Profil erkannt</strong>Reizfreie, gut abgestimmte Formulierung für ${escapeHtml(profileLabel)}.</div>`;
+    ? `<div class="verdict-box ${a.score < 58 ? 'badge-bad' : 'badge-warn'}"><strong>${escapeHtml(L('res_warnings_title', { profile: profileLabel }))}</strong><ul class="bullet-list">${a.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul></div>`
+    : `<div class="verdict-box badge-ok"><strong>${escapeHtml(L('res_no_flags_title'))}</strong>${escapeHtml(L('res_no_flags_desc', { profile: profileLabel }))}</div>`;
 
   const reasonsHtml = a.reasons.length
-    ? `<div class="verdict-box badge-info"><strong>✨ Pluspunkte</strong><ul class="bullet-list">${a.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>`
+    ? `<div class="verdict-box badge-info"><strong>${escapeHtml(L('res_positives_title'))}</strong><ul class="bullet-list">${a.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>`
     : '';
 
   const skinTypesHtml = a.skinTypes
     .map((st) => `
       <div class="skintype-row ${st.id === a.skinProfile?.skinType ? 'active-profile' : ''}">
         <div>
-          <div class="skintype-name">${escapeHtml(st.name)} ${st.id === a.skinProfile?.skinType ? '<span class="pill badge-info">Dein Grundtyp</span>' : ''}</div>
+          <div class="skintype-name">${escapeHtml(st.name)} ${st.id === a.skinProfile?.skinType ? `<span class="pill badge-info">${escapeHtml(L('res_your_base_type'))}</span>` : ''}</div>
           <div class="skintype-note">${escapeHtml(st.note)}</div>
         </div>
         <span class="pill ${st.verdict.cls}">${st.score}/100</span>
@@ -551,7 +644,7 @@ function renderResult(a, aiSummary = '') {
   const inciItemsHtml = a.breakdown
     .map((item) => {
       const divider = item.isAnchor
-        ? `<div class="anchor-divider">── 1-%-Linie erkannt: ${escapeHtml(item.anchorLabel)} ──</div>`
+        ? `<div class="anchor-divider">${escapeHtml(L('res_anchor_divider', { label: item.anchorLabel }))}</div>`
         : '';
       return `
         ${divider}
@@ -568,11 +661,11 @@ function renderResult(a, aiSummary = '') {
     .join('');
 
   const aiHtml = aiSummary
-    ? `<div class="card"><h2>🤖 Personalisierte KI-Einschätzung</h2><div class="ai-box">${escapeHtml(aiSummary)}</div></div>`
+    ? `<div class="card"><h2>${escapeHtml(L('res_ai_heading'))}</h2><div class="ai-box">${escapeHtml(aiSummary)}</div></div>`
     : '';
 
   const slotOptionsHtml = ROUTINE_SLOTS.map(
-    (s) => `<option value="${s.id}" ${s.id === a.routinePlacement.slotId ? 'selected' : ''}>${escapeHtml(s.label)}</option>`
+    (s) => `<option value="${s.id}" ${s.id === a.routinePlacement.slotId ? 'selected' : ''}>${escapeHtml(pickLang(s.label, lang))}</option>`
   ).join('');
 
   container.innerHTML = `
@@ -581,7 +674,7 @@ function renderResult(a, aiSummary = '') {
         <div>
           <h2 class="verdict-title">${escapeHtml(a.productName)}</h2>
           <div class="verdict-meta">
-            Kategorie: <strong>${escapeHtml(a.categoryLabel)}</strong> · ${a.totalCount} Inhaltsstoffe · Profil: <strong>${escapeHtml(profileLabel)}</strong>
+            ${escapeHtml(L('res_category'))}: <strong>${escapeHtml(a.categoryLabel)}</strong> · ${a.totalCount} ${escapeHtml(L('res_ingredients'))} · ${escapeHtml(L('res_profile'))}: <strong>${escapeHtml(profileLabel)}</strong>
             ${a.sourceUrl ? ` · <a href="${escapeHtml(a.sourceUrl)}" target="_blank" rel="noopener">Link</a>` : ''}
           </div>
         </div>
@@ -594,19 +687,19 @@ function renderResult(a, aiSummary = '') {
       ${warningsHtml}
       ${reasonsHtml}
 
-      <h3>📋 Einordnung in deinen Pflegeplan</h3>
+      <h3>${escapeHtml(L('res_plan_heading'))}</h3>
       <div class="routine-slot-box">
         <h4>${escapeHtml(a.routinePlacement.slot)}</h4>
         <p>${escapeHtml(a.routinePlacement.advice)}</p>
-        <p style="margin-top:6px; color: var(--text-muted);"><strong>Dein Pflegeplan:</strong> ${escapeHtml(a.routinePlacement.existingMatch)}</p>
+        <p style="margin-top:6px; color: var(--text-muted);"><strong>${escapeHtml(L('res_your_plan'))}:</strong> ${escapeHtml(a.routinePlacement.existingMatch)}</p>
       </div>
 
       <div class="add-plan-box">
         <div class="add-plan-row">
-          <label class="field-label" for="add-plan-slot" style="margin-bottom:0;">Produkt in meinen Pflegeplan übernehmen</label>
+          <label class="field-label" for="add-plan-slot" style="margin-bottom:0;">${escapeHtml(L('res_add_plan_label'))}</label>
           <select id="add-plan-slot" class="text-input">${slotOptionsHtml}</select>
-          <input id="add-plan-note" type="text" class="text-input" placeholder="Eigene Notiz (optional, z. B. 2x/Woche abends)" />
-          <button id="btn-add-to-plan" class="btn btn-primary btn-full" type="button">➕ Zum Pflegeplan hinzufügen</button>
+          <input id="add-plan-note" type="text" class="text-input" placeholder="${escapeHtml(L('res_add_plan_note_ph'))}" />
+          <button id="btn-add-to-plan" class="btn btn-primary btn-full" type="button">${escapeHtml(L('res_btn_add_plan'))}</button>
           <p id="add-plan-feedback" class="hint-small" style="margin-top:0;"></p>
         </div>
       </div>
@@ -615,16 +708,16 @@ function renderResult(a, aiSummary = '') {
     ${aiHtml}
 
     <div class="card">
-      <h2>🎯 Zu welchem Hauttyp passt das Produkt?</h2>
+      <h2>${escapeHtml(L('res_skintypes_heading'))}</h2>
       <div class="skintype-grid">${skinTypesHtml}</div>
     </div>
 
     <div class="card">
-      <h2>🔬 INCI-Aufschlüsselung (${a.totalCount} Stoffe)</h2>
+      <h2>${escapeHtml(L('res_inci_heading', { count: a.totalCount }))}</h2>
       <p class="helper-text">
         ${a.anchorFound
-          ? `Die unsichtbare <strong>1-%-Linie</strong> wurde ab <strong>Platz #${a.anchorPos}</strong> erkannt (${escapeHtml(a.anchorLabel)}). Alles davor ist absteigend nach Gewicht sortiert.`
-          : 'Kein klassischer 1-%-Anker (z. B. Phenoxyethanol/Carbomer) gefunden – Mengenangaben sind grobe Richtwerte nach Listenplatz.'}
+          ? L('res_anchor_found', { pos: a.anchorPos, label: escapeHtml(a.anchorLabel) })
+          : L('res_anchor_missing')}
       </p>
       <div class="inci-list">${inciItemsHtml}</div>
     </div>
@@ -634,11 +727,14 @@ function renderResult(a, aiSummary = '') {
     const slotId = document.getElementById('add-plan-slot').value;
     const note = document.getElementById('add-plan-note').value.trim();
     addAnalysisToPlan(a, slotId, note, aiSummary);
-    const slotLabel = ROUTINE_SLOTS.find((s) => s.id === slotId)?.label || slotId;
-    document.getElementById('add-plan-feedback').textContent = `✅ Gespeichert unter „${slotLabel}“!`;
+    const slotObj = ROUTINE_SLOTS.find((s) => s.id === slotId);
+    const slotLabel = slotObj ? pickLang(slotObj.label, lang) : slotId;
+    document.getElementById('add-plan-feedback').textContent = L('res_added_plan', { slot: slotLabel });
   });
 
-  container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (shouldScroll) {
+    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 function addAnalysisToPlan(analysis, slotId, note = '', aiSummary = '') {
@@ -661,12 +757,12 @@ function addAnalysisToPlan(analysis, slotId, note = '', aiSummary = '') {
 }
 
 // ============================================================================
-// PFLEGEPLAN VIEW (dynamisch vom Nutzer aus Scans befüllt)
+// PFLEGEPLAN / ROUTINE VIEW
 // ============================================================================
 function bindPlanControls() {
   document.getElementById('btn-clear-plan').addEventListener('click', () => {
     if (!state.plan.length) return;
-    if (confirm('Alle Produkte aus deinem Pflegeplan entfernen?')) {
+    if (confirm(L('confirm_clear_plan'))) {
       state.plan = [];
       savePlan();
       renderPlan();
@@ -675,57 +771,54 @@ function bindPlanControls() {
 }
 
 function renderPlan() {
+  const lang = state.settings.lang;
   const container = document.getElementById('plan-content');
   const sp = state.settings.skinProfile;
-  const profileLabel = formatSkinProfileLabel(sp);
+  const profileLabel = formatSkinProfileLabel(sp, lang);
 
-  // Dynamische Tipps passend zu den angehakten Besonderheiten
   const activeTips = [];
   (sp.conditions || []).forEach((cid) => {
-    if (CONDITION_TIPS[cid]) activeTips.push(...CONDITION_TIPS[cid]);
+    const tips = CONDITION_TIPS[cid]?.[lang];
+    if (tips) activeTips.push(...tips);
   });
 
   let html = `
     <div class="card">
-      <h2>🧬 Aktives Hautprofil: ${escapeHtml(profileLabel)}</h2>
-      <p class="helper-text" style="margin-bottom:0;">
-        Dein Pflegeplan wird lokal auf deinem Gerät gespeichert. Scanne Produkte per <strong>Foto, Link oder INCI-Text</strong> und füge sie direkt dem passenden Pflegeschritt hinzu.
-      </p>
+      <h2>${escapeHtml(L('plan_active_profile', { label: profileLabel }))}</h2>
+      <p class="helper-text" style="margin-bottom:0;">${L('plan_intro')}</p>
     </div>
   `;
 
   if (!state.plan.length) {
     html += `
       <div class="card">
-        <h2>📋 Noch keine Produkte im Pflegeplan</h2>
-        <p class="helper-text">
-          Wechsle zum Tab <strong>📷 Scanner</strong>, analysiere dein erstes Produkt (z. B. Reiniger, Serum, Creme oder LSF) und tippe im Ergebnis auf <strong>„➕ Zum Pflegeplan hinzufügen“</strong>.
-        </p>
-        <button id="btn-go-scan" class="btn btn-primary btn-full" type="button">📷 Erstes Produkt scannen</button>
+        <h2>${escapeHtml(L('plan_empty_title'))}</h2>
+        <p class="helper-text">${L('plan_empty_desc')}</p>
+        <button id="btn-go-scan" class="btn btn-primary btn-full" type="button">${escapeHtml(L('btn_first_scan'))}</button>
       </div>
     `;
   } else {
-    // Nach Gruppen rendern
-    const groups = [...new Set(ROUTINE_SLOTS.map((s) => s.group))];
+    const groups = [...new Set(ROUTINE_SLOTS.map((s) => pickLang(s.group, lang)))];
     groups.forEach((groupName) => {
-      const groupSlotIds = ROUTINE_SLOTS.filter((s) => s.group === groupName).map((s) => s.id);
+      const groupSlotIds = ROUTINE_SLOTS.filter((s) => pickLang(s.group, lang) === groupName).map((s) => s.id);
       const items = state.plan.filter((item) => groupSlotIds.includes(item.slotId));
       if (!items.length) return;
 
       const itemsHtml = items
         .map((item) => {
-          const slotLabel = ROUTINE_SLOTS.find((s) => s.id === item.slotId)?.label || '';
+          const slotObj = ROUTINE_SLOTS.find((s) => s.id === item.slotId);
+          const slotLabel = slotObj ? pickLang(slotObj.label, lang) : '';
           return `
             <div class="plan-product-row">
               <div class="plan-product-main" data-open-plan-id="${escapeHtml(item.id)}">
                 <div class="plan-step-title">${escapeHtml(slotLabel)}</div>
                 <div class="plan-step-product">${escapeHtml(item.productName)}</div>
                 ${item.note ? `<div class="plan-step-desc">📝 ${escapeHtml(item.note)}</div>` : ''}
-                <div class="hint-small" style="margin-top:2px;">Antippen für vollständige INCI-Analyse</div>
+                <div class="hint-small" style="margin-top:2px;">${escapeHtml(L('plan_tap_hint'))}</div>
               </div>
               <div class="plan-product-actions">
                 <span class="pill ${escapeHtml(item.verdictCls || 'badge-info')}">${item.score}/100</span>
-                <button class="icon-btn" type="button" data-remove-plan-id="${escapeHtml(item.id)}" title="Entfernen">✕</button>
+                <button class="icon-btn" type="button" data-remove-plan-id="${escapeHtml(item.id)}" title="${escapeHtml(L('res_remove'))}">✕</button>
               </div>
             </div>`;
         })
@@ -742,9 +835,9 @@ function renderPlan() {
   if (activeTips.length) {
     html += `
       <div class="card">
-        <h2>🛡️ Pflegeregeln für dein Hautprofil</h2>
+        <h2>${escapeHtml(L('plan_rules_heading'))}</h2>
         <ul class="rule-list">
-          ${activeTips.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}
+          ${activeTips.map((tip) => `<li>${escapeHtml(tip)}</li>`).join('')}
         </ul>
       </div>`;
   }
@@ -764,12 +857,13 @@ function renderPlan() {
         category: item.category || 'auto',
         skinProfile: state.settings.skinProfile,
         userPlan: state.plan,
-        sourceUrl: item.sourceUrl || ''
+        sourceUrl: item.sourceUrl || '',
+        lang: state.settings.lang
       });
       state.lastAnalysis = reanalyzed;
       state.lastAiSummary = item.aiSummary || '';
       switchView('scan');
-      renderResult(reanalyzed, item.aiSummary || '');
+      renderResult(reanalyzed, item.aiSummary || '', true);
     });
   });
 
@@ -789,7 +883,7 @@ function renderPlan() {
 function bindHistoryControls() {
   document.getElementById('btn-clear-history').addEventListener('click', () => {
     if (!state.history.length) return;
-    if (confirm('Alle gespeicherten Analysen löschen?')) {
+    if (confirm(L('confirm_clear_history'))) {
       state.history = [];
       saveHistory();
       renderHistory();
@@ -798,15 +892,17 @@ function bindHistoryControls() {
 }
 
 function renderHistory() {
+  const lang = state.settings.lang;
   const container = document.getElementById('history-list');
   if (!state.history.length) {
-    container.innerHTML = `<div class="card"><p class="helper-text" style="margin:0;">Noch keine Produkte gescannt. Nutze den Tab „Scanner“, um dein erstes Produkt per Foto, Link oder INCI-Text zu prüfen.</p></div>`;
+    container.innerHTML = `<div class="card"><p class="helper-text" style="margin:0;">${escapeHtml(L('history_empty'))}</p></div>`;
     return;
   }
 
+  const locale = lang === 'en' ? 'en-US' : 'de-DE';
   container.innerHTML = state.history
     .map((h) => {
-      const dt = new Date(h.timestamp).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const dt = new Date(h.timestamp).toLocaleString(locale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
       const label = h.profileLabel || 'Normal';
       return `
         <div class="card history-card" data-history-id="${escapeHtml(h.id)}">
@@ -829,12 +925,13 @@ function renderHistory() {
         category: entry.category || 'auto',
         skinProfile: state.settings.skinProfile,
         userPlan: state.plan,
-        sourceUrl: entry.sourceUrl || ''
+        sourceUrl: entry.sourceUrl || '',
+        lang: state.settings.lang
       });
       state.lastAnalysis = reanalyzed;
       state.lastAiSummary = entry.aiSummary || '';
       switchView('scan');
-      renderResult(reanalyzed, entry.aiSummary || '');
+      renderResult(reanalyzed, entry.aiSummary || '', true);
     });
   });
 }
@@ -871,20 +968,20 @@ function bindSettingsControls() {
     state.settings.model = modelSelect.value;
     saveSettings();
     syncProfileUI();
-    feedback.textContent = `✅ Einstellungen lokal gespeichert (Modell: ${state.settings.model}).`;
+    feedback.textContent = L('feedback_saved', { model: state.settings.model });
   });
 
   document.getElementById('btn-load-models').addEventListener('click', async () => {
     const key = apiKeyInput.value.trim();
     if (!key) {
-      feedback.textContent = '⚠️ Bitte zuerst deinen Gemini API-Key eintragen.';
+      feedback.textContent = L('feedback_need_key');
       return;
     }
-    feedback.textContent = 'Lade verfügbare Modelle für deinen API-Key…';
+    feedback.textContent = L('feedback_loading_models');
     try {
       const models = await listAvailableModels(key);
       if (!models.length) {
-        feedback.textContent = '⚠️ Keine generateContent-Modelle für diesen Key gefunden.';
+        feedback.textContent = L('feedback_no_models');
         return;
       }
       populateModelDropdown(modelSelect, models, modelSelect.value);
@@ -892,7 +989,7 @@ function bindSettingsControls() {
       state.settings.model = modelSelect.value;
       saveSettings();
       syncProfileUI();
-      feedback.textContent = `✅ ${models.length} verfügbare Modelle geladen! Gewählt: ${state.settings.model}`;
+      feedback.textContent = L('feedback_models_loaded', { count: models.length, model: state.settings.model });
     } catch (err) {
       feedback.textContent = `❌ ${err.message}`;
     }
@@ -902,10 +999,10 @@ function bindSettingsControls() {
     const key = apiKeyInput.value.trim();
     const preferredModel = modelSelect.value;
     if (!key) {
-      feedback.textContent = '⚠️ Bitte zuerst einen Gemini API-Key eintragen.';
+      feedback.textContent = L('feedback_need_key');
       return;
     }
-    feedback.textContent = 'Teste Verbindung (und suche automatisch ein freies Modell falls nötig)…';
+    feedback.textContent = L('feedback_testing');
     try {
       const res = await testOrAutoSelectModel(key, preferredModel);
       if (res.models && res.models.length) {
@@ -918,8 +1015,8 @@ function bindSettingsControls() {
       saveSettings();
       syncProfileUI();
       feedback.textContent = res.autoSwitched
-        ? `✅ Automatisch auf verfügbares Modell „${res.model}“ gewechselt & gespeichert! Antwort: „${res.reply}“`
-        : `✅ Verbindung erfolgreich mit „${res.model}“! Antwort: „${res.reply}“`;
+        ? L('feedback_auto_switched', { model: res.model, reply: res.reply })
+        : L('feedback_test_ok', { model: res.model, reply: res.reply });
     } catch (err) {
       feedback.textContent = `❌ ${err.message}`;
     }

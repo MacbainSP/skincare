@@ -1,9 +1,10 @@
-const CACHE_NAME = 'skincheck-pwa-v8';
+const CACHE_NAME = 'skincheck-pwa-v9';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './manifest.webmanifest',
+  './js/i18n.js',
   './js/data.js',
   './js/analyzer.js',
   './js/gemini.js',

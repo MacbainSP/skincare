@@ -1,12 +1,16 @@
 import { ROUTINE_SLOTS, SKIN_TYPES, SKIN_CONDITIONS, formatSkinProfileLabel } from './data.js';
+import { pickLang } from './i18n.js';
 
-function describeSkinProfile(skinProfile) {
-  const label = formatSkinProfileLabel(skinProfile);
+function describeSkinProfile(skinProfile, lang = 'de') {
+  const label = formatSkinProfileLabel(skinProfile, lang);
   const st = SKIN_TYPES.find((s) => s.id === skinProfile?.skinType) || SKIN_TYPES[0];
   const conds = (skinProfile?.conditions || [])
     .map((id) => SKIN_CONDITIONS.find((c) => c.id === id))
     .filter(Boolean);
-  const details = [st.desc, ...conds.map((c) => `${c.label}: ${c.desc}`)].join(' ');
+  const details = [
+    pickLang(st.desc, lang),
+    ...conds.map((c) => `${pickLang(c.label, lang)}: ${pickLang(c.desc, lang)}`)
+  ].join(' ');
   return { label, details, condIds: skinProfile?.conditions || [] };
 }
 
@@ -185,16 +189,18 @@ export function compressImageFile(file, maxDim = 1600) {
 /**
  * Liest Produktname, Kategorie und vollständige INCI-Liste aus einem Foto per Gemini Vision.
  */
-export async function extractFromPhoto({ apiKey, model, base64Data, mimeType, skinProfile }) {
-  const { label, details } = describeSkinProfile(skinProfile);
-  const prompt = `Du bist ein präziser Dermokosmetik-INCI-Scanner.
-Analysiere dieses Produktfoto und extrahiere EXAKT:
-1. "productName": Markenname + Produktname (falls auf dem Foto sichtbar, sonst bestmögliche Bezeichnung).
-2. "category": genau einer dieser Werte: "cleanser", "serum", "moisturizer", "sunscreen", "body_lotion", "ointment", "shower_oil", "exfoliant", "shampoo", "conditioner", "lip_balm", "auto".
-3. "rawInci": die vollständige, kommagetrennte INCI-Liste in exakt der Reihenfolge wie auf der Packung (korrigiere offensichtliche Zeilenumbrüche/Trennstriche, aber erfinde keine Stoffe hinzu). Falls keine INCI-Liste auf dem Bild lesbar ist, gib "" zurück.
-4. "aiSummary": kurze, konkrete Einschätzung (3–5 Sätze auf Deutsch) speziell für das Hautprofil "${label}" (${details}).
+export async function extractFromPhoto({ apiKey, model, base64Data, mimeType, skinProfile, lang = 'de' }) {
+  const isEn = lang === 'en';
+  const { label, details } = describeSkinProfile(skinProfile, lang);
+  const outLang = isEn ? 'English' : 'Deutsch';
+  const prompt = `You are a precise dermocosmetic INCI scanner.
+Analyze this product photo and extract EXACTLY:
+1. "productName": Brand + product name (if visible on the photo, otherwise best estimate).
+2. "category": exactly one of: "cleanser", "serum", "moisturizer", "sunscreen", "body_lotion", "ointment", "shower_oil", "exfoliant", "shampoo", "conditioner", "lip_balm", "auto".
+3. "rawInci": the complete comma-separated INCI ingredient list in the exact order printed on the package (fix line breaks/hyphens, do not invent ingredients). If no INCI list is readable, return "".
+4. "aiSummary": concise, practical assessment (3-5 sentences in ${outLang}) tailored to the skin profile "${label}" (${details}).
 
-Antworte ausschließlich als JSON-Objekt mit den Schlüsseln: productName, category, rawInci, aiSummary.`;
+Respond strictly as a JSON object with keys: productName, category, rawInci, aiSummary.`;
 
   const text = await callGemini({
     apiKey,
@@ -208,7 +214,11 @@ Antworte ausschließlich als JSON-Objekt mit den Schlüsseln: productName, categ
 
   const parsed = parseJsonLoose(text);
   if (!parsed.rawInci || parsed.rawInci.trim().length < 5) {
-    throw new Error('Auf dem Foto konnte keine INCI-Liste gelesen werden. Bitte fotografiere die Rückseite mit den „Ingredients“ möglichst scharf und nah.');
+    throw new Error(
+      isEn
+        ? 'Could not read an INCI list from the photo. Please take a sharper, closer photo of the “Ingredients” section.'
+        : 'Auf dem Foto konnte keine INCI-Liste gelesen werden. Bitte fotografiere die Rückseite mit den „Ingredients“ möglichst scharf und nah.'
+    );
   }
   return parsed;
 }
@@ -267,10 +277,11 @@ async function fetchPageTextViaCorsProxy(targetUrl) {
  * 2) Auf GitHub Pages / Handy über CORS-fähige Reader-Proxies (r.jina.ai / allorigins)
  * 3) Extraktion mit normalem Gemini generateContent (OHNE google_search-Tool, daher kein 429-Free-Tier-Limit!)
  */
-export async function extractFromUrl({ url, apiKey, model, skinProfile, userPlan = [] }) {
+export async function extractFromUrl({ url, apiKey, model, skinProfile, userPlan = [], lang = 'de' }) {
+  const isEn = lang === 'en';
   const trimmedUrl = (url || '').trim();
   if (!/^https?:\/\//i.test(trimmedUrl)) {
-    throw new Error('Bitte gib eine gültige Produkt-URL ein (beginnend mit https://).');
+    throw new Error(isEn ? 'Please enter a valid product URL (starting with https://).' : 'Bitte gib eine gültige Produkt-URL ein (beginnend mit https://).');
   }
 
   let proxyResult = null;
@@ -283,7 +294,7 @@ export async function extractFromUrl({ url, apiKey, model, skinProfile, userPlan
       }
     }
   } catch {
-    // Kein lokaler Proxy aktiv (z. B. GitHub Pages)
+    // Kein lokaler Proxy aktiv
   }
 
   if (proxyResult && proxyResult.rawInci && proxyResult.rawInci.length > 25) {
@@ -296,22 +307,22 @@ export async function extractFromUrl({ url, apiKey, model, skinProfile, userPlan
           productName: proxyResult.productName,
           rawInci: proxyResult.rawInci,
           skinProfile,
-          userPlan
+          userPlan,
+          lang
         });
       } catch {
         // Deterministische Analyse reicht als Fallback
       }
     }
     return {
-      productName: proxyResult.productName || 'Produkt aus Link',
+      productName: proxyResult.productName || (isEn ? 'Product from Link' : 'Produkt aus Link'),
       category: 'auto',
       rawInci: proxyResult.rawInci,
       aiSummary,
-      source: 'Lokaler Link-Parser'
+      source: 'Local Link Parser'
     };
   }
 
-  // Stufe 2: Öffentlicher CORS-Proxy (für GitHub Pages / Android unterwegs)
   let pageSnippet = proxyResult?.snippet || '';
   if (!pageSnippet) {
     pageSnippet = await fetchPageTextViaCorsProxy(trimmedUrl);
@@ -319,25 +330,28 @@ export async function extractFromUrl({ url, apiKey, model, skinProfile, userPlan
 
   if (!apiKey || !apiKey.trim()) {
     throw new Error(
-      'Für die automatische Link-Auswertung auf GitHub Pages bitte deinen kostenlosen Gemini API-Key im Tab „Setup“ eintragen (oder die INCI-Liste direkt im Tab „INCI-Text“ einfügen).'
+      isEn
+        ? 'Please add your free Gemini API key in the “Setup” tab for automatic link analysis (or paste the INCI list directly in the “INCI Text” tab).'
+        : 'Für die automatische Link-Auswertung auf GitHub Pages bitte deinen kostenlosen Gemini API-Key im Tab „Setup“ eintragen (oder die INCI-Liste direkt im Tab „INCI-Text“ einfügen).'
     );
   }
 
-  const { label, details } = describeSkinProfile(skinProfile);
+  const { label, details } = describeSkinProfile(skinProfile, lang);
+  const outLang = isEn ? 'English' : 'Deutsch';
 
   if (pageSnippet) {
-    const prompt = `Extrahiere aus diesem Auszug einer Produktseite den Produktnamen und die vollständige, exakte INCI-Liste (Ingredients / Inhaltsstoffe).
+    const prompt = `Extract the product name and complete, exact INCI ingredient list from this product page excerpt.
 URL: ${trimmedUrl}
 
-Seitenauszug:
+Page excerpt:
 ${pageSnippet}
 
-Antworte ausschließlich als JSON-Objekt:
+Respond strictly as a JSON object:
 {
-  "productName": "Marke + Produktname",
+  "productName": "Brand + Product Name",
   "category": "cleanser|serum|moisturizer|sunscreen|body_lotion|ointment|shower_oil|exfoliant|shampoo|conditioner|lip_balm|auto",
-  "rawInci": "Vollständige kommagetrennte INCI-Liste (oder leerer String, falls im Auszug keine INCI-Liste enthalten ist)",
-  "aiSummary": "Kurze Einschätzung (3-4 Sätze auf Deutsch) für das Hautprofil: ${label} (${details})"
+  "rawInci": "Complete comma-separated INCI list (or empty string if not present)",
+  "aiSummary": "Concise assessment (3-4 sentences in ${outLang}) for skin profile: ${label} (${details})"
 }`;
 
     const text = await callGemini({
@@ -350,44 +364,47 @@ Antworte ausschließlich als JSON-Objekt:
 
     const parsed = parseJsonLoose(text);
     if (parsed.rawInci && parsed.rawInci.trim().length > 10) {
-      return { ...parsed, source: 'Web-Abruf + Gemini' };
+      return { ...parsed, source: 'Web Fetch + Gemini' };
     }
   }
 
-  // Falls der Shop alle Proxies blockiert hat (z. B. Cloudflare/Bot-Schutz), KEIN google_search erzwingen (das verursacht 429 im Free Tier),
-  // sondern sauber erklären, wie es sofort klappt.
   throw new Error(
-    'Dieser Online-Shop blockiert leider den automatischen Seitenabruf (Bot-Schutz). Kopiere die Inhaltsstoffe auf der Produktseite kurz in den Tab „📝 INCI-Text“ oder fotografiere die Rückseite im Tab „📷 Foto“.'
+    isEn
+      ? 'This online store blocks automated page fetching (bot protection). Please copy the ingredients into the “📝 INCI Text” tab or take a photo in the “📷 Photo” tab.'
+      : 'Dieser Online-Shop blockiert leider den automatischen Seitenabruf (Bot-Schutz). Kopiere die Inhaltsstoffe auf der Produktseite kurz in den Tab „📝 INCI-Text“ oder fotografiere die Rückseite im Tab „📷 Foto“.'
   );
 }
 
 /**
  * Kurze, personalisierte KI-Zweitmeinung für ein bereits analysiertes Produkt.
  */
-export async function getAiSecondOpinion({ apiKey, model, productName, rawInci, skinProfile, userPlan = [] }) {
+export async function getAiSecondOpinion({ apiKey, model, productName, rawInci, skinProfile, userPlan = [], lang = 'de' }) {
   if (!apiKey || !apiKey.trim()) return '';
-  const { label, details } = describeSkinProfile(skinProfile);
+  const isEn = lang === 'en';
+  const { label, details } = describeSkinProfile(skinProfile, lang);
+  const outLang = isEn ? 'English' : 'Deutsch';
 
   let inventorySection = '';
   if (userPlan && userPlan.length) {
     const lines = userPlan.map((item) => {
-      const slotLabel = ROUTINE_SLOTS.find((s) => s.id === item.slotId)?.label || item.slotId;
+      const slotObj = ROUTINE_SLOTS.find((s) => s.id === item.slotId);
+      const slotLabel = slotObj ? pickLang(slotObj.label, lang) : item.slotId;
       return `- ${item.productName} (${slotLabel})`;
     });
-    inventorySection = `\nBereits im persönlichen Pflegeplan gespeichert:\n${lines.join('\n')}`;
+    inventorySection = `\nAlready saved in the user's personal routine:\n${lines.join('\n')}`;
   }
 
-  const prompt = `Du bist ein evidenzbasierter Dermokosmetik-Berater.
-Gewähltes Hautprofil: ${label}
+  const prompt = `You are an evidence-based dermocosmetics advisor.
+Selected skin profile: ${label}
 Details: ${details}${inventorySection}
 
-Analysiertes Produkt: ${productName || 'Unbekannt'}
-INCI-Liste: ${rawInci}
+Analyzed product: ${productName || 'Unknown'}
+INCI list: ${rawInci}
 
-Gib eine prägnante, praxisnahe Einschätzung in maximal 5 kurzen Sätzen auf Deutsch:
-1) Passt es zum gewählten Hautprofil (und falls nein, zu welchem Hauttyp eher)?
-2) Wo genau im Pflegeplan einsetzen – und gibt es Überschneidungen oder Konflikte mit bereits gespeicherten Produkten?
-3) Gibt es eine wichtige Anwendungsregel (z. B. Kein-Brennen-Regel, Soak & Seal, CWC, LSF)?`;
+Provide a concise, practical assessment in at most 5 short sentences in ${outLang}:
+1) Does it fit the selected skin profile (and if not, which skin type does it suit better)?
+2) Where in the routine should it be used – and are there overlaps or conflicts with already saved products?
+3) Any key usage rule (e.g., No-Sting rule, Soak & Seal, CWC, SPF)?`;
 
   return callGemini({
     apiKey,

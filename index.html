@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>SkinCheck – INCI Scanner &amp; Pflegeplan</title>
+  <title>SkinCheck – INCI Scanner &amp; Routine</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
@@ -20,129 +20,119 @@
       <div class="header-left">
         <div class="brand-mark" aria-hidden="true">SC</div>
         <div>
-          <h1 class="app-title">SkinCheck</h1>
-          <p class="app-subtitle" id="header-profile-label">Normal + Psoriasis</p>
+          <h1 class="app-title" data-i18n="app_title">SkinCheck</h1>
+          <p class="app-subtitle" id="header-profile-label">Normal</p>
         </div>
+      </div>
+      <div class="lang-switch" id="lang-switch" role="group" aria-label="Language">
+        <button class="lang-btn active" data-lang="de" type="button">DE</button>
+        <button class="lang-btn" data-lang="en" type="button">EN</button>
       </div>
     </header>
 
     <!-- Main Scrollable Content -->
     <main class="app-main">
       <!-- VIEW 1: SCAN -->
-      <section id="view-scan" class="view active" aria-label="Produkt scannen">
+      <section id="view-scan" class="view active" aria-label="Scanner">
         <!-- Flexible Skin Profile Selector -->
         <div class="card profile-selector-card">
           <div class="profile-selector-head">
-            <h2 style="margin:0;">🧬 Hautprofil wählen</h2>
+            <h2 style="margin:0;" data-i18n="skin_profile_heading">🧬 Hautprofil wählen</h2>
           </div>
 
           <div class="field-group" style="margin-top:10px; margin-bottom:10px;">
-            <label class="field-label" for="select-skin-type">Grund-Hauttyp</label>
+            <label class="field-label" for="select-skin-type" data-i18n="skin_type_label">Grund-Hauttyp</label>
             <select id="select-skin-type" class="text-input"></select>
           </div>
 
           <div class="field-group" style="margin-bottom:0;">
-            <span class="field-label">Besonderheiten / Hautzustände (optional, mehrfach wählbar)</span>
+            <span class="field-label" data-i18n="conditions_label">Besonderheiten / Hautzustände (optional, mehrfach wählbar)</span>
             <div id="conditions-checkbox-grid" class="condition-grid"></div>
           </div>
         </div>
 
         <div class="card hero-card">
           <div class="input-mode-tabs" role="tablist">
-            <button class="mode-tab active" data-mode="photo" role="tab" aria-selected="true">📷 Foto</button>
-            <button class="mode-tab" data-mode="link" role="tab" aria-selected="false">🔗 Link</button>
-            <button class="mode-tab" data-mode="text" role="tab" aria-selected="false">📝 INCI-Text</button>
+            <button class="mode-tab active" data-mode="photo" role="tab" aria-selected="true" data-i18n="tab_photo">📷 Foto</button>
+            <button class="mode-tab" data-mode="link" role="tab" aria-selected="false" data-i18n="tab_link">🔗 Link</button>
+            <button class="mode-tab" data-mode="text" role="tab" aria-selected="false" data-i18n="tab_text">📝 INCI-Text</button>
           </div>
 
           <!-- Mode: Photo -->
           <div id="panel-photo" class="mode-panel active">
-            <p class="helper-text">
+            <p class="helper-text" data-i18n-html="photo_helper">
               Fotografiere die <strong>INCI-Liste</strong> auf der Rückseite des Produkts (oder wähle ein Foto aus der Galerie).
             </p>
             <div class="photo-actions">
               <button id="btn-open-camera" class="btn btn-primary btn-large" type="button">
-                <span>📸 Kamera öffnen</span>
+                <span data-i18n="btn_open_camera">📸 Kamera öffnen</span>
               </button>
               <label class="btn btn-secondary" for="input-gallery">
-                <span>🖼️ Galerie</span>
+                <span data-i18n="btn_gallery">🖼️ Galerie</span>
                 <input id="input-gallery" type="file" accept="image/*" hidden />
               </label>
               <input id="input-camera-fallback" type="file" accept="image/*" capture="environment" hidden />
             </div>
 
-            <!-- In-App Live Camera Viewfinder (zuverlässig in Firefox & Chrome Android) -->
+            <!-- In-App Live Camera Viewfinder -->
             <div id="camera-live-wrap" class="camera-live-wrap hidden">
               <div class="camera-stage">
                 <video id="camera-video" autoplay playsinline muted></video>
                 <div class="camera-guide" aria-hidden="true">
-                  <span>INCI-Liste hier scharf ausrichten</span>
+                  <span data-i18n="camera_guide">INCI-Liste hier scharf ausrichten</span>
                 </div>
               </div>
               <div class="camera-controls">
-                <button id="btn-capture-frame" class="btn btn-primary btn-large" type="button">📸 Auslösen</button>
-                <button id="btn-close-camera" class="btn btn-ghost" type="button">✕ Schließen</button>
+                <button id="btn-capture-frame" class="btn btn-primary btn-large" type="button" data-i18n="btn_capture">📸 Auslösen</button>
+                <button id="btn-close-camera" class="btn btn-ghost" type="button" data-i18n="btn_close">✕ Schließen</button>
               </div>
             </div>
+
             <div id="photo-preview-wrap" class="photo-preview-wrap hidden">
-              <img id="photo-preview" alt="Vorschau des Produktfotos" />
+              <img id="photo-preview" alt="Preview" />
               <div class="photo-preview-actions">
-                <button id="btn-analyze-photo" class="btn btn-primary" type="button">✨ Foto analysieren</button>
-                <button id="btn-clear-photo" class="btn btn-ghost" type="button">Verwerfen</button>
+                <button id="btn-analyze-photo" class="btn btn-primary" type="button" data-i18n="btn_analyze_photo">✨ Foto analysieren</button>
+                <button id="btn-clear-photo" class="btn btn-ghost" type="button" data-i18n="btn_discard">Verwerfen</button>
               </div>
             </div>
-            <p class="hint-small" id="photo-api-hint">
-              Für die automatische Foto-Texterkennung wird dein Gemini API-Key aus den Einstellungen genutzt.
-            </p>
+            <p class="hint-small" id="photo-api-hint"></p>
           </div>
 
           <!-- Mode: Link -->
           <div id="panel-link" class="mode-panel">
-            <p class="helper-text">
+            <p class="helper-text" data-i18n-html="link_helper">
               Füge einen Produkt-Link von <strong>Rossmann, dm, Müller, Apotheke</strong> o. Ä. ein.
             </p>
             <div class="field-group">
-              <input id="input-url" type="url" class="text-input" placeholder="https://www.rossmann.de/de/..." autocomplete="off" />
+              <input id="input-url" type="url" class="text-input" data-i18n-placeholder="link_placeholder" placeholder="https://www.rossmann.de/de/..." autocomplete="off" />
             </div>
-            <button id="btn-analyze-url" class="btn btn-primary btn-full" type="button">🔍 Link auslesen &amp; analysieren</button>
-            <p class="hint-small">
-              Nutzt den lokalen Python-Proxy (für Rossmann/dm ohne CORS-Blockade) und/oder Gemini-Suche.
+            <button id="btn-analyze-url" class="btn btn-primary btn-full" type="button" data-i18n="btn_analyze_url">🔍 Link auslesen &amp; analysieren</button>
+            <p class="hint-small" data-i18n="link_hint">
+              Nutzt unterwegs automatischen Web-Abruf + Gemini (oder lokal den Python-Proxy).
             </p>
           </div>
 
           <!-- Mode: Text -->
           <div id="panel-text" class="mode-panel">
             <div class="field-group">
-              <label class="field-label" for="input-product-name">Produktname (optional)</label>
-              <input id="input-product-name" type="text" class="text-input" placeholder="z. B. ISANA med Akut-Pflege Serum 5% Urea" />
+              <label class="field-label" for="input-product-name" data-i18n="label_product_name">Produktname (optional)</label>
+              <input id="input-product-name" type="text" class="text-input" data-i18n-placeholder="placeholder_product_name" placeholder="z. B. Mildes 5% Urea Serum" />
             </div>
             <div class="field-group">
-              <label class="field-label" for="input-product-category">Produktkategorie (optional, sonst automatisch)</label>
-              <select id="input-product-category" class="text-input">
-                <option value="auto">Automatisch erkennen</option>
-                <option value="cleanser">Gesichtsreinigung / Waschlotion</option>
-                <option value="serum">Serum / Konzentrat</option>
-                <option value="moisturizer">Gesichtscreme / Fluid</option>
-                <option value="sunscreen">Sonnenschutz (LSF)</option>
-                <option value="body_lotion">Körperlotion / Körpercreme</option>
-                <option value="ointment">Plaque-Salbe / Intensivpflege</option>
-                <option value="shower_oil">Duschöl / Duschgel</option>
-                <option value="exfoliant">Chemisches Peeling (AHA/BHA/PHA)</option>
-                <option value="shampoo">Shampoo / Kopfhaut</option>
-                <option value="conditioner">Spülung / Haarmaske / Styling</option>
-                <option value="lip_balm">Lippenpflege</option>
-              </select>
+              <label class="field-label" for="input-product-category" data-i18n="label_category">Produktkategorie (optional, sonst automatisch)</label>
+              <select id="input-product-category" class="text-input"></select>
             </div>
             <div class="field-group">
-              <label class="field-label" for="input-inci">INCI-Liste (kommagetrennt)</label>
-              <textarea id="input-inci" class="text-area" rows="5" placeholder="Aqua, Glycerin, Urea, Panthenol, Caprylic/Capric Triglyceride, ..."></textarea>
+              <label class="field-label" for="input-inci" data-i18n="label_inci">INCI-Liste (kommagetrennt)</label>
+              <textarea id="input-inci" class="text-area" rows="5" data-i18n-placeholder="placeholder_inci" placeholder="Aqua, Glycerin, Urea, Panthenol, Caprylic/Capric Triglyceride, ..."></textarea>
             </div>
-            <button id="btn-analyze-text" class="btn btn-primary btn-full" type="button">🧪 Inhaltsstoffe analysieren</button>
+            <button id="btn-analyze-text" class="btn btn-primary btn-full" type="button" data-i18n="btn_analyze_text">🧪 Inhaltsstoffe analysieren</button>
             <div class="sample-row">
-              <span class="hint-small">Schnelltest:</span>
-              <button class="chip-btn" type="button" data-sample="urea_serum">5% Urea Serum</button>
-              <button class="chip-btn" type="button" data-sample="bad_cream">Duft-Alkohol-Creme</button>
-              <button class="chip-btn" type="button" data-sample="bha_peeling">2% BHA Peeling</button>
-              <button class="chip-btn" type="button" data-sample="lip_sunozon">sunozon Lippen LSF 50</button>
+              <span class="hint-small" data-i18n="sample_label">Schnelltest:</span>
+              <button class="chip-btn" type="button" data-sample="urea_serum" data-i18n="sample_urea">5% Urea Serum</button>
+              <button class="chip-btn" type="button" data-sample="bad_cream" data-i18n="sample_bad">Duft-Alkohol-Creme</button>
+              <button class="chip-btn" type="button" data-sample="bha_peeling" data-i18n="sample_bha">2% BHA Peeling</button>
+              <button class="chip-btn" type="button" data-sample="lip_sunozon" data-i18n="sample_lip">Lippenpflege LSF 50</button>
             </div>
           </div>
         </div>
@@ -150,7 +140,7 @@
         <!-- Status / Loading Banner -->
         <div id="status-banner" class="status-banner hidden" role="status">
           <div class="spinner"></div>
-          <span id="status-text">Analysiere Produkt…</span>
+          <span id="status-text">…</span>
         </div>
 
         <!-- Error Banner -->
@@ -161,93 +151,93 @@
       </section>
 
       <!-- VIEW 2: PFLEGEPLAN -->
-      <section id="view-plan" class="view" aria-label="Mein Pflegeplan">
+      <section id="view-plan" class="view" aria-label="Routine">
         <div class="section-header-row">
-          <h2>Mein Pflegeplan</h2>
-          <button id="btn-clear-plan" class="btn btn-ghost btn-sm" type="button">Leeren</button>
+          <h2 data-i18n="plan_heading">Mein Pflegeplan</h2>
+          <button id="btn-clear-plan" class="btn btn-ghost btn-sm" type="button" data-i18n="btn_clear_plan">Leeren</button>
         </div>
         <div id="plan-content"></div>
       </section>
 
       <!-- VIEW 3: VERLAUF -->
-      <section id="view-history" class="view" aria-label="Scan-Verlauf">
+      <section id="view-history" class="view" aria-label="History">
         <div class="section-header-row">
-          <h2>Gespeicherte Analysen</h2>
-          <button id="btn-clear-history" class="btn btn-ghost btn-sm" type="button">Alle löschen</button>
+          <h2 data-i18n="history_heading">Gespeicherte Analysen</h2>
+          <button id="btn-clear-history" class="btn btn-ghost btn-sm" type="button" data-i18n="btn_clear_history">Alle löschen</button>
         </div>
         <div id="history-list"></div>
       </section>
 
       <!-- VIEW 4: EINSTELLUNGEN -->
-      <section id="view-settings" class="view" aria-label="Einstellungen">
+      <section id="view-settings" class="view" aria-label="Setup">
         <div class="card">
-          <h2>Gemini KI-Anbindung (Foto-Scan &amp; Link-Analyse)</h2>
-          <p class="helper-text">
+          <h2 data-i18n="settings_ai_heading">Gemini KI-Anbindung (Foto-Scan &amp; Link-Analyse)</h2>
+          <p class="helper-text" data-i18n-html="settings_ai_desc">
             Dein API-Key wird ausschließlich lokal auf deinem Gerät (<code>localStorage</code>) gespeichert und niemals übertragen.
           </p>
           <details class="api-guide-details" open>
-            <summary style="font-weight:700; font-size:13.5px; color:var(--primary-dark); cursor:pointer; margin-bottom:8px;">
+            <summary style="font-weight:700; font-size:13.5px; color:var(--primary-dark); cursor:pointer; margin-bottom:8px;" data-i18n="settings_guide_summary">
               🔑 So bekommst du deinen kostenlosen API-Key
             </summary>
             <ol class="install-steps">
-              <li>Öffne <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--primary); font-weight:700;">aistudio.google.com/apikey ↗</a> und melde dich mit deinem Google-Konto an.</li>
-              <li>Klicke auf <strong>„Create API key“</strong> (ggf. ein neues kostenloses Projekt bestätigen).</li>
-              <li>Kopiere den Schlüssel (beginnt mit <code>AIza...</code>) und füge ihn unten ein.</li>
-              <li>Tippe auf <strong>„🔌 Testen / Auto-Wahl“</strong> – die App wählt automatisch ein passendes kostenloses Flash-Modell.</li>
+              <li data-i18n-html="settings_guide_step1">Öffne <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--primary); font-weight:700;">aistudio.google.com/apikey ↗</a> und melde dich mit deinem Google-Konto an.</li>
+              <li data-i18n-html="settings_guide_step2">Klicke auf <strong>„Create API key“</strong> (ggf. ein neues kostenloses Projekt bestätigen).</li>
+              <li data-i18n-html="settings_guide_step3">Kopiere den Schlüssel (beginnt mit <code>AIza...</code>) und füge ihn unten ein.</li>
+              <li data-i18n-html="settings_guide_step4">Tippe auf <strong>„🔌 Testen / Auto-Wahl“</strong> – die App wählt automatisch ein passendes kostenloses Flash-Modell.</li>
             </ol>
           </details>
           <div class="field-group">
-            <label class="field-label" for="input-api-key">Gemini API-Key</label>
+            <label class="field-label" for="input-api-key" data-i18n="label_api_key">Gemini API-Key</label>
             <input id="input-api-key" type="password" class="text-input" placeholder="AIza..." autocomplete="off" />
           </div>
           <div class="field-group">
-            <label class="field-label" for="input-gemini-model">Gemini Modell</label>
+            <label class="field-label" for="input-gemini-model" data-i18n="label_gemini_model">Gemini Modell</label>
             <select id="input-gemini-model" class="text-input">
-              <option value="gemini-flash-latest">gemini-flash-latest (Empfohlen – immer aktuelles Flash)</option>
-              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Schnell &amp; Free-Tier)</option>
-              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Neu &amp; leicht)</option>
-              <option value="gemini-3.8-flash">gemini-3.8-flash (Neuestes Flash)</option>
+              <option value="gemini-flash-latest">gemini-flash-latest</option>
+              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash</option>
               <option value="gemini-2.5-flash">gemini-2.5-flash</option>
             </select>
           </div>
           <div class="button-row">
-            <button id="btn-save-settings" class="btn btn-primary" type="button">💾 Speichern</button>
-            <button id="btn-test-api" class="btn btn-secondary" type="button">🔌 Testen / Auto-Wahl</button>
-            <button id="btn-load-models" class="btn btn-ghost" type="button">🔄 Modelle laden</button>
+            <button id="btn-save-settings" class="btn btn-primary" type="button" data-i18n="btn_save">💾 Speichern</button>
+            <button id="btn-test-api" class="btn btn-secondary" type="button" data-i18n="btn_test_api">🔌 Testen / Auto-Wahl</button>
+            <button id="btn-load-models" class="btn btn-ghost" type="button" data-i18n="btn_load_models">🔄 Modelle laden</button>
           </div>
           <p id="settings-feedback" class="hint-small"></p>
         </div>
 
         <div class="card">
-          <h2>Als Android-App installieren (PWA)</h2>
+          <h2 data-i18n="settings_pwa_heading">Als Android-App installieren (PWA)</h2>
           <ol class="install-steps">
-            <li>Öffne diese Seite in <strong>Google Chrome</strong> auf deinem Android-Handy.</li>
-            <li>Tippe oben rechts auf das <strong>⋮ Menü</strong>.</li>
-            <li>Wähle <strong>„Zum Startbildschirm hinzufügen“</strong> bzw. <strong>„App installieren“</strong>.</li>
-            <li>Fertig – SkinCheck startet ab sofort im Vollbild mit eigenem App-Icon und funktioniert für Text-Analysen &amp; Pflegeplan sogar offline.</li>
+            <li data-i18n-html="pwa_step1">Öffne diese Seite in <strong>Chrome</strong> oder <strong>Firefox</strong> auf deinem Android-Handy.</li>
+            <li data-i18n-html="pwa_step2">Tippe auf das <strong>⋮ Menü</strong>.</li>
+            <li data-i18n-html="pwa_step3">Wähle <strong>„App installieren“</strong> bzw. <strong>„Zum Startbildschirm hinzufügen“</strong>.</li>
+            <li data-i18n-html="pwa_step4">Fertig – SkinCheck startet ab sofort im Vollbild mit eigenem App-Icon und funktioniert für Text-Analysen &amp; Pflegeplan auch offline.</li>
           </ol>
-          <button id="btn-install-pwa" class="btn btn-primary btn-full hidden" type="button">📲 Jetzt als App installieren</button>
+          <button id="btn-install-pwa" class="btn btn-primary btn-full hidden" type="button" data-i18n="btn_install_pwa">📲 Jetzt als App installieren</button>
         </div>
       </section>
     </main>
 
     <!-- Bottom Navigation (Android Style) -->
-    <nav class="bottom-nav" aria-label="Hauptnavigation">
+    <nav class="bottom-nav" aria-label="Main navigation">
       <button class="nav-item active" data-view="scan" type="button">
         <span class="nav-icon">📷</span>
-        <span class="nav-label">Scanner</span>
+        <span class="nav-label" data-i18n="nav_scanner">Scanner</span>
       </button>
       <button class="nav-item" data-view="plan" type="button">
         <span class="nav-icon">📋</span>
-        <span class="nav-label">Pflegeplan</span>
+        <span class="nav-label" data-i18n="nav_plan">Pflegeplan</span>
       </button>
       <button class="nav-item" data-view="history" type="button">
         <span class="nav-icon">🕘</span>
-        <span class="nav-label">Verlauf</span>
+        <span class="nav-label" data-i18n="nav_history">Verlauf</span>
       </button>
       <button class="nav-item" data-view="settings" type="button">
         <span class="nav-icon">⚙️</span>
-        <span class="nav-label">Setup</span>
+        <span class="nav-label" data-i18n="nav_settings">Setup</span>
       </button>
     </nav>
   </div>

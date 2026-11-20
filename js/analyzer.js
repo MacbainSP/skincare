@@ -1,8 +1,6 @@
 import { INCI_DB, ONE_PERCENT_ANCHORS, formatSkinProfileLabel } from './data.js';
+import { pickLang } from './i18n.js';
 
-/**
- * Zerlegt einen rohen INCI-Text in eine saubere Liste einzelner Inhaltsstoffe.
- */
 export function parseInciList(rawText) {
   if (!rawText) return [];
   let cleaned = rawText
@@ -11,7 +9,6 @@ export function parseInciList(rawText) {
     .replace(/\s*\.\s*$/, '')
     .replace(/;/g, ',');
 
-  // Kommas innerhalb von Klammern schützen
   let depth = 0;
   let current = '';
   const items = [];
@@ -58,17 +55,14 @@ function findAnchorIndex(items) {
   return { index: -1, anchor: null };
 }
 
-function estimatePercentage(pos1Based, isWaterBased, anchorIndex) {
-  if (anchorIndex >= 0 && pos1Based - 1 >= anchorIndex) {
-    return '≤ 1 %';
-  }
-  if (pos1Based === 1) {
-    return isWaterBased ? 'ca. 60–85 %' : 'ca. 40–70 %';
-  }
-  if (pos1Based === 2) return 'ca. 8–15 %';
-  if (pos1Based <= 4) return 'ca. 3–7 %';
-  if (pos1Based <= 7) return 'ca. 1,5–3 %';
-  return anchorIndex >= 0 ? 'ca. 1–2 %' : 'ca. ≤ 1–2 %';
+function estimatePercentage(pos1Based, isWaterBased, anchorIndex, lang = 'de') {
+  const approx = lang === 'en' ? '~' : 'ca. ';
+  if (anchorIndex >= 0 && pos1Based - 1 >= anchorIndex) return '≤ 1 %';
+  if (pos1Based === 1) return isWaterBased ? `${approx}60–85 %` : `${approx}40–70 %`;
+  if (pos1Based === 2) return `${approx}8–15 %`;
+  if (pos1Based <= 4) return `${approx}3–7 %`;
+  if (pos1Based <= 7) return lang === 'en' ? '~1.5–3 %' : 'ca. 1,5–3 %';
+  return anchorIndex >= 0 ? `${approx}1–2 %` : `${approx}≤ 1–2 %`;
 }
 
 export function detectCategory(productName = '', items = [], userCategory = 'auto') {
@@ -77,18 +71,17 @@ export function detectCategory(productName = '', items = [], userCategory = 'aut
   const joined = items.join(' ').toLowerCase();
 
   if (/lippen|lip\s*balm|lippenpflege/.test(name)) return 'lip_balm';
-  if (/lsf|spf|sonnen|anti-uv|uv-fluid|sunozon|sundance/.test(name)) return 'sunscreen';
+  if (/lsf|spf|sonnen|anti-uv|uv-fluid|sunscreen|sun\s*fluid/.test(name)) return 'sunscreen';
   if (/shampoo/.test(name)) return 'shampoo';
-  if (/spülung|conditioner|haarmaske|lockengel|haaröl|trockenshampoo/.test(name)) return 'conditioner';
-  if (/duschöl/.test(name)) return 'shower_oil';
-  if (/peeling|bha|aha|pha|salicyl|glykol/.test(name)) return 'exfoliant';
-  if (/waschgel|waschlotion|reinigung|cleanser|mizellen|duschgel/.test(name)) return 'cleanser';
-  if (/salbe|balsam|ointment/.test(name)) return 'ointment';
-  if (/körperlotion|körpermilch|bodylotion|body/.test(name)) return 'body_lotion';
-  if (/serum|konzentrat|booster|ampulle/.test(name)) return 'serum';
-  if (/creme|fluid|gel|lotion|pflege/.test(name)) return 'moisturizer';
+  if (/spülung|conditioner|haarmaske|hair\s*mask|lockengel|haaröl|trockenshampoo/.test(name)) return 'conditioner';
+  if (/duschöl|shower\s*oil/.test(name)) return 'shower_oil';
+  if (/peeling|exfoliant|bha|aha|pha|salicyl|glykol|glycolic/.test(name)) return 'exfoliant';
+  if (/waschgel|waschlotion|reinigung|cleanser|face\s*wash|mizellen|duschgel/.test(name)) return 'cleanser';
+  if (/salbe|balsam|ointment|balm/.test(name)) return 'ointment';
+  if (/körperlotion|körpermilch|body\s*lotion|body\s*cream/.test(name)) return 'body_lotion';
+  if (/serum|konzentrat|booster|ampulle|concentrate/.test(name)) return 'serum';
+  if (/creme|cream|fluid|gel|lotion|moisturizer|pflege/.test(name)) return 'moisturizer';
 
-  // Fallback über INCI-Signatur
   const uvCount = items.filter((i) => {
     const r = matchInciRule(i.toLowerCase());
     return r && (r.category === 'good_uv' || r.category === 'bad_uv');
@@ -110,90 +103,84 @@ export function detectCategory(productName = '', items = [], userCategory = 'aut
 }
 
 export const CATEGORY_LABELS = {
-  cleanser: 'Gesichtsreinigung / Waschlotion',
-  serum: 'Serum / Konzentrat',
-  moisturizer: 'Gesichtscreme / Pflege',
-  sunscreen: 'Sonnenschutz (LSF)',
-  body_lotion: 'Körperlotion / Körpercreme',
-  ointment: 'Plaque-Salbe / Okklusivpflege',
-  shower_oil: 'Duschöl / Körperreinigung',
-  exfoliant: 'Chemisches Peeling (AHA/BHA/PHA)',
-  shampoo: 'Shampoo / Kopfhaut',
-  conditioner: 'Spülung / Haarmaske / Styling',
-  lip_balm: 'Lippenpflege'
+  cleanser: { de: 'Gesichtsreinigung / Waschlotion', en: 'Cleanser / Wash' },
+  serum: { de: 'Serum / Konzentrat', en: 'Serum / Concentrate' },
+  moisturizer: { de: 'Gesichtscreme / Pflege', en: 'Moisturizer / Fluid' },
+  sunscreen: { de: 'Sonnenschutz (LSF)', en: 'Sunscreen (SPF)' },
+  body_lotion: { de: 'Körperlotion / Körpercreme', en: 'Body Lotion / Cream' },
+  ointment: { de: 'Plaque-Salbe / Okklusivpflege', en: 'Ointment / Occlusive Balm' },
+  shower_oil: { de: 'Duschöl / Körperreinigung', en: 'Shower Oil / Body Wash' },
+  exfoliant: { de: 'Chemisches Peeling (AHA/BHA/PHA)', en: 'Chemical Exfoliant (AHA/BHA/PHA)' },
+  shampoo: { de: 'Shampoo / Kopfhaut', en: 'Shampoo / Scalp' },
+  conditioner: { de: 'Spülung / Haarmaske / Styling', en: 'Conditioner / Hair Mask / Styling' },
+  lip_balm: { de: 'Lippenpflege', en: 'Lip Care' }
 };
 
-/**
- * Führt die komplette deterministische INCI-Analyse durch.
- */
 export function analyzeInci({
   productName = '',
   rawInci = '',
   category = 'auto',
   skinProfile = { skinType: 'normal', conditions: [] },
   userPlan = [],
-  sourceUrl = ''
+  sourceUrl = '',
+  lang = 'de'
 }) {
+  const isEn = lang === 'en';
   const items = parseInciList(rawInci);
   if (items.length === 0) {
-    throw new Error('Keine gültige INCI-Liste erkannt. Bitte kommagetrennte Inhaltsstoffe eingeben.');
+    throw new Error(
+      isEn
+        ? 'No valid INCI list detected. Please enter comma-separated ingredients.'
+        : 'Keine gültige INCI-Liste erkannt. Bitte kommagetrennte Inhaltsstoffe eingeben.'
+    );
   }
 
   const skinType = skinProfile?.skinType || 'normal';
   const conditions = Array.isArray(skinProfile?.conditions) ? skinProfile.conditions : [];
   const hasCond = (c) => conditions.includes(c);
-  const profileLabel = formatSkinProfileLabel({ skinType, conditions });
+  const profileLabel = formatSkinProfileLabel({ skinType, conditions }, lang);
 
   const detectedCategory = detectCategory(productName, items, category);
   const isWaterBased = /^aqua\b|^water\b/i.test(items[0]);
   const { index: anchorIndex, anchor: anchorInfo } = findAnchorIndex(items);
 
   const flags = {
-    fragrance: [],
-    badAlcoholHigh: [],
-    badAlcoholLow: [],
-    essentialOil: [],
-    scrub: [],
-    harshSurfactant: [],
-    sles: [],
-    badUv: [],
-    goodUv: [],
-    keratolytic: [],
-    barrier: [],
-    soothing: [],
-    humectant: [],
-    sebumActive: [],
-    heavyLipidHigh: [],
-    lightLipid: [],
-    mildSurfactant: [],
-    blenderWarnings: [],
-    stingTriggers: []
+    fragrance: [], badAlcoholHigh: [], badAlcoholLow: [], essentialOil: [],
+    scrub: [], harshSurfactant: [], sles: [], badUv: [], goodUv: [],
+    keratolytic: [], barrier: [], soothing: [], humectant: [], sebumActive: [],
+    heavyLipidHigh: [], lightLipid: [], mildSurfactant: [], blenderWarnings: [], stingTriggers: []
   };
 
   const breakdown = items.map((raw, idx) => {
     const pos = idx + 1;
     const norm = raw.toLowerCase();
     const rule = matchInciRule(norm);
-    const est = estimatePercentage(pos, isWaterBased, anchorIndex);
+    const est = estimatePercentage(pos, isWaterBased, anchorIndex, lang);
     const belowAnchor = anchorIndex >= 0 && idx >= anchorIndex;
 
     let status = 'neutral';
-    let label = 'Basis- / Hilfsstoff';
-    let desc = belowAnchor ? 'Unterhalb der 1-%-Linie (Hilfs-, Konservierungs- oder Zusatzstoff).' : 'Träger-, Emulgator- oder Basisstoff.';
+    let label = isEn ? 'Base / Auxiliary' : 'Basis- / Hilfsstoff';
+    let desc = belowAnchor
+      ? (isEn ? 'Below the 1% line (preservative, stabilizer, or trace additive).' : 'Unterhalb der 1-%-Linie (Hilfs-, Konservierungs- oder Zusatzstoff).')
+      : (isEn ? 'Carrier, emulsifier, or base ingredient.' : 'Träger-, Emulgator- oder Basisstoff.');
 
     if (rule) {
-      label = rule.name;
-      desc = rule.desc;
+      label = pickLang(rule.name, lang);
+      desc = pickLang(rule.desc, lang);
       status = rule.severity;
 
       if (rule.category === 'bad_alcohol') {
         if (pos <= 6 && !belowAnchor) {
           status = 'bad';
-          desc = `Steht weit vorne (Platz ${pos}, ${est}) – trocknet aus & reizt die Hautbarriere!`;
+          desc = isEn
+            ? `High up on the list (pos. ${pos}, ${est}) – drying & irritating to the skin barrier!`
+            : `Steht weit vorne (Platz ${pos}, ${est}) – trocknet aus & reizt die Hautbarriere!`;
           flags.badAlcoholHigh.push(raw);
         } else {
           status = 'neutral';
-          desc = `Steht weit hinten (Platz ${pos}, ${est}) – vermutlich nur Lösungsmittel/Extrakt-Träger (< 1 %), i. d. R. unkritisch.`;
+          desc = isEn
+            ? `Low on the list (pos. ${pos}, ${est}) – likely a solvent/extract carrier (< 1%), usually unproblematic.`
+            : `Steht weit hinten (Platz ${pos}, ${est}) – vermutlich nur Lösungsmittel/Extrakt-Träger (< 1 %), i. d. R. unkritisch.`;
           flags.badAlcoholLow.push(raw);
         }
       } else if (rule.category === 'fragrance' || rule.category === 'fragrance_allergen') {
@@ -231,178 +218,172 @@ export function analyzeInci({
 
       if (rule.needsHighPos && belowAnchor) {
         status = 'warn';
-        desc += ' ⚠️ Steht erst hinter der 1-%-Linie – wahrscheinlich zu niedrig dosiert (Blender-Gefahr)!';
+        desc += isEn
+          ? ' ⚠️ Listed after the 1% line – likely under-dosed (marketing dose)!'
+          : ' ⚠️ Steht erst hinter der 1-%-Linie – wahrscheinlich zu niedrig dosiert (Blender-Gefahr)!';
         flags.blenderWarnings.push(raw);
       }
     } else if (pos === 1 && isWaterBased) {
-      label = 'Wasser (Basis)';
-      desc = 'Hauptlösungsmittel (ca. 60–85 % bei wasserbasierten Produkten).';
+      label = isEn ? 'Water (Base)' : 'Wasser (Basis)';
+      desc = isEn ? 'Main solvent (~60–85% in water-based formulas).' : 'Hauptlösungsmittel (ca. 60–85 % bei wasserbasierten Produkten).';
     }
 
     return {
-      pos,
-      raw,
-      label,
-      desc,
-      est,
-      status,
+      pos, raw, label, desc, est, status,
       isAnchor: idx === anchorIndex,
-      anchorLabel: idx === anchorIndex ? anchorInfo.label : null
+      anchorLabel: idx === anchorIndex ? pickLang(anchorInfo.label, lang) : null
     };
   });
 
-  // Sondercheck: Echtes vs. falsches Duschöl
   let showerOilWarning = null;
   if (detectedCategory === 'shower_oil') {
     const firstIsOil = /oil|olea|glycine soja|ricinus|helianthus|prunus/.test(items[0].toLowerCase());
     if (!firstIsOil && isWaterBased && (flags.sles.length || flags.harshSurfactant.length)) {
-      showerOilWarning = 'Falsches „Duschöl“! Wasser steht auf Platz 1 + Sulfat-Tenside – reinigt wie ein austrocknendes Duschgel statt wie ein echtes Öl (50–65 % Pflanzenöl auf Platz 1–2).';
+      showerOilWarning = isEn
+        ? 'Not a true “shower oil”! Water is #1 + sulfate surfactants – cleanses like a drying shower gel rather than a true oil (50–65% plant oil at #1–2).'
+        : 'Falsches „Duschöl“! Wasser steht auf Platz 1 + Sulfat-Tenside – reinigt wie ein austrocknendes Duschgel statt wie ein echtes Öl (50–65 % Pflanzenöl auf Platz 1–2).';
     }
   }
 
-  // --- DYNAMISCHE BEWERTUNG FÜR DAS AKTIVE HAUTPROFIL ---
-  const isStrictSensitive =
-    skinType === 'sensitive' || hasCond('psoriasis') || hasCond('neurodermitis') || hasCond('rosacea');
-  const isOilyProne =
-    skinType === 'oily' || skinType === 'combination' || hasCond('seborrhoe') || hasCond('acne');
-  const isDryProne =
-    skinType === 'dry' || hasCond('neurodermitis');
+  const isStrictSensitive = skinType === 'sensitive' || hasCond('psoriasis') || hasCond('neurodermitis') || hasCond('rosacea');
+  const isOilyProne = skinType === 'oily' || skinType === 'combination' || hasCond('seborrhoe') || hasCond('acne');
+  const isDryProne = skinType === 'dry' || hasCond('neurodermitis');
 
   let score = 86;
   const reasons = [];
   const warnings = [];
 
-  // 1. Duftstoffe
   if (flags.fragrance.length) {
-    const pen = isStrictSensitive ? 35 : 14;
-    score -= pen;
+    score -= isStrictSensitive ? 35 : 14;
     warnings.push(
-      `Duftstoffe/Allergene (${flags.fragrance.slice(0, 3).join(', ')})` +
-        (isStrictSensitive ? ' – starker Reiz- & Allergie-Trigger für dein Profil.' : ' – unnötiges Reizpotenzial.')
+      isEn
+        ? `Fragrance/allergens (${flags.fragrance.slice(0, 3).join(', ')})` + (isStrictSensitive ? ' – major irritation & allergy trigger for your profile.' : ' – unnecessary irritation risk.')
+        : `Duftstoffe/Allergene (${flags.fragrance.slice(0, 3).join(', ')})` + (isStrictSensitive ? ' – starker Reiz- & Allergie-Trigger für dein Profil.' : ' – unnötiges Reizpotenzial.')
     );
   }
 
-  // 2. Alkohol weit vorne
   if (flags.badAlcoholHigh.length) {
-    const pen = isStrictSensitive || isDryProne ? 30 : 20;
-    score -= pen;
+    score -= isStrictSensitive || isDryProne ? 30 : 20;
     warnings.push(
-      `Austrocknender Alkohol weit vorne (${flags.badAlcoholHigh.join(', ')}) – schwächt die Lipidbarriere` +
-        (isOilyProne ? ' und fördert „dehydrated oily skin“ / Nachfetten.' : ' & kann brennen.')
+      isEn
+        ? `Drying alcohol high up (${flags.badAlcoholHigh.join(', ')}) – weakens the lipid barrier` + (isOilyProne ? ' and can trigger dehydrated oily skin / rebound oiliness.' : ' and may sting.')
+        : `Austrocknender Alkohol weit vorne (${flags.badAlcoholHigh.join(', ')}) – schwächt die Lipidbarriere` + (isOilyProne ? ' und fördert „dehydrated oily skin“ / Nachfetten.' : ' & kann brennen.')
     );
   } else if (flags.badAlcoholLow.length) {
-    reasons.push('Alkohol steht erst unter der 1-%-Linie – i. d. R. unkritisch');
+    reasons.push(isEn ? 'Alcohol is below the 1% line – generally unproblematic' : 'Alkohol steht erst unter der 1-%-Linie – i. d. R. unkritisch');
   }
 
-  // 3. Ätherische Öle / Menthol
   if (flags.essentialOil.length) {
     const isCwcShampoo = detectedCategory === 'shampoo' && hasCond('curly_oily') && !isStrictSensitive;
     if (isCwcShampoo) {
-      reasons.push('Menthol/erfrischende Extrakte im Ansatz-Shampoo (bei CWC-Technik OK für fettige Kopfhaut)');
+      reasons.push(isEn ? 'Menthol/cooling extracts in scalp shampoo (fine for oily roots with CWC)' : 'Menthol/erfrischende Extrakte im Ansatz-Shampoo (bei CWC-Technik OK für fettige Kopfhaut)');
     } else {
       score -= isStrictSensitive ? 28 : 14;
-      warnings.push(`Ätherische Öle / Reizstoffe (${flags.essentialOil.join(', ')}) – hohes Reiz- & Rötungspotenzial.`);
+      warnings.push(isEn
+        ? `Essential oils / irritants (${flags.essentialOil.join(', ')}) – high irritation & redness risk.`
+        : `Ätherische Öle / Reizstoffe (${flags.essentialOil.join(', ')}) – hohes Reiz- & Rötungspotenzial.`);
     }
   }
 
-  // 4. Mechanische Reibekörper
   if (flags.scrub.length) {
     score -= hasCond('psoriasis') || hasCond('rosacea') ? 40 : 18;
-    warnings.push(
-      `Mechanische Reibekörper (${flags.scrub.join(', ')})` +
-        (hasCond('psoriasis') ? ' – hohes Risiko für das Koebner-Phänomen (neue Plaques)!' : ' – können Mikroverletzungen & Rötungen fördern.')
-    );
+    warnings.push(isEn
+      ? `Physical scrub particles (${flags.scrub.join(', ')})` + (hasCond('psoriasis') ? ' – high risk for the Koebner phenomenon (new plaques)!' : ' – can cause micro-tears & redness.')
+      : `Mechanische Reibekörper (${flags.scrub.join(', ')})` + (hasCond('psoriasis') ? ' – hohes Risiko für das Koebner-Phänomen (neue Plaques)!' : ' – können Mikroverletzungen & Rötungen fördern.'));
   }
 
-  // 5. Tenside
   if (flags.harshSurfactant.length) {
     score -= 30;
-    warnings.push(`Aggressives Sulfat-Tensid (${flags.harshSurfactant.join(', ')}) – zerstört Barrierelipide.`);
+    warnings.push(isEn
+      ? `Harsh sulfate surfactant (${flags.harshSurfactant.join(', ')}) – strips barrier lipids.`
+      : `Aggressives Sulfat-Tensid (${flags.harshSurfactant.join(', ')}) – zerstört Barrierelipide.`);
   }
   if (flags.sles.length) {
     if (detectedCategory === 'shampoo' && (hasCond('curly_oily') || skinType === 'oily') && !hasCond('psoriasis')) {
       score += 4;
-      reasons.push('SLES im Shampoo entfettet fettigen Ansatz gründlich (mit CWC-Spitzenschutz anwenden)');
+      reasons.push(isEn ? 'SLES cleanses oily roots thoroughly (use with CWC end protection)' : 'SLES im Shampoo entfettet fettigen Ansatz gründlich (mit CWC-Spitzenschutz anwenden)');
     } else if (isStrictSensitive || isDryProne || detectedCategory !== 'shampoo') {
       score -= 18;
-      warnings.push('SLES enthalten – für Gesicht/empfindliche oder trockene Haut zu entfettend.');
+      warnings.push(isEn ? 'Contains SLES – too stripping for sensitive, dry, or facial skin.' : 'SLES enthalten – für Gesicht/empfindliche oder trockene Haut zu entfettend.');
     }
   }
 
-  // 6. Schwere Lipide bei fettiger Haut / Seborrhoe / Akne
   if (flags.heavyLipidHigh.length && ['moisturizer', 'sunscreen', 'serum'].includes(detectedCategory)) {
     if (isOilyProne) {
       score -= skinType === 'combination' && !hasCond('acne') ? 18 : 30;
-      warnings.push(
-        `Sehr reichhaltig/okklusiv (${flags.heavyLipidHigh.slice(0, 2).join(', ')} weit vorne) – kann bei fettiger Haut, Seborrhoe oder Akne Glanz & Unreinheiten fördern.`
-      );
+      warnings.push(isEn
+        ? `Very rich/occlusive (${flags.heavyLipidHigh.slice(0, 2).join(', ')} high up) – may cause shine or clogged pores on oily/acne-prone skin.`
+        : `Sehr reichhaltig/okklusiv (${flags.heavyLipidHigh.slice(0, 2).join(', ')} weit vorne) – kann bei fettiger Haut, Seborrhoe oder Akne Glanz & Unreinheiten fördern.`);
     } else if (isDryProne || hasCond('psoriasis')) {
       score += 6;
-      reasons.push(`Schützende Lipide (${flags.heavyLipidHigh.slice(0, 2).join(', ')}) – ideal für Barriere/Winter/Plaques`);
+      reasons.push(isEn
+        ? `Protective lipids (${flags.heavyLipidHigh.slice(0, 2).join(', ')}) – great for barrier/winter/plaques`
+        : `Schützende Lipide (${flags.heavyLipidHigh.slice(0, 2).join(', ')}) – ideal für Barriere/Winter/Plaques`);
     }
   }
 
-  // 7. UV-Filter
   if (flags.badUv.length) {
     score -= isStrictSensitive ? 15 : 8;
-    warnings.push(`Älterer/kritischer UV-Filter (${flags.badUv.join(', ')}) – höheres Allergierisiko.`);
+    warnings.push(isEn
+      ? `Older/sensitizing UV filter (${flags.badUv.join(', ')}) – higher allergy potential.`
+      : `Älterer/kritischer UV-Filter (${flags.badUv.join(', ')}) – höheres Allergierisiko.`);
   }
   if (flags.goodUv.length >= 2) {
     score += hasCond('pih') || hasCond('rosacea') || hasCond('psoriasis') ? 8 : 5;
-    reasons.push(`Moderne, photostabile UV-Filter (${flags.goodUv.length}x) – schützt vor UV-Schüben & Pigmentflecken`);
+    reasons.push(isEn
+      ? `Modern photostable UV filters (${flags.goodUv.length}x) – protects against UV flare-ups & dark spots`
+      : `Moderne, photostabile UV-Filter (${flags.goodUv.length}x) – schützt vor UV-Schüben & Pigmentflecken`);
   }
 
-  // 8. Keratolyse / Säuren / Urea
   if (flags.keratolytic.length) {
     if (hasCond('rosacea')) {
       score -= 12;
-      warnings.push(`Enthält ${flags.keratolytic.join(', ')} – bei Rosazea sehr vorsichtig testen (Flush-/Reizgefahr).`);
+      warnings.push(isEn
+        ? `Contains ${flags.keratolytic.join(', ')} – patch-test carefully with rosacea (flushing risk).`
+        : `Enthält ${flags.keratolytic.join(', ')} – bei Rosazea sehr vorsichtig testen (Flush-/Reizgefahr).`);
     } else {
       score += hasCond('psoriasis') || hasCond('acne') || hasCond('seborrhoe') ? 6 : 4;
-      reasons.push(`Gezielte Keratolyse / Porenklärung (${flags.keratolytic.join(', ')})`);
+      reasons.push(isEn
+        ? `Targeted keratolysis / pore clearing (${flags.keratolytic.join(', ')})`
+        : `Gezielte Keratolyse / Porenklärung (${flags.keratolytic.join(', ')})`);
     }
   }
   if (flags.stingTriggers.length && (hasCond('psoriasis') || hasCond('neurodermitis'))) {
-    warnings.push(`Kein-Brennen-Regel: ${flags.stingTriggers.join(', ')} strikt nur auf geschlossene Haut auftragen, nicht auf offene Risse!`);
+    warnings.push(isEn
+      ? `No-Sting Rule: Apply ${flags.stingTriggers.join(', ')} strictly to intact skin, never to open cracks!`
+      : `Kein-Brennen-Regel: ${flags.stingTriggers.join(', ')} strikt nur auf geschlossene Haut auftragen, nicht auf offene Risse!`);
   }
 
-  // 9. Weitere Pluspunkte
-  if (flags.barrier.length) { score += isDryProne || isStrictSensitive ? 8 : 5; reasons.push(`Barrierelipide/Ceramide (${flags.barrier.slice(0, 3).join(', ')})`); }
-  if (flags.soothing.length) { score += 5; reasons.push(`Beruhigend & antientzündlich (${flags.soothing.slice(0, 3).join(', ')})`); }
-  if (flags.humectant.length) { score += 4; reasons.push(`Feuchthalter / NMF (${flags.humectant.slice(0, 3).join(', ')})`); }
-  if (flags.mildSurfactant.length) { score += 5; reasons.push('Milde, barrierefreundliche Tenside'); }
+  if (flags.barrier.length) { score += isDryProne || isStrictSensitive ? 8 : 5; reasons.push(isEn ? `Barrier lipids/ceramides (${flags.barrier.slice(0, 3).join(', ')})` : `Barrierelipide/Ceramide (${flags.barrier.slice(0, 3).join(', ')})`); }
+  if (flags.soothing.length) { score += 5; reasons.push(isEn ? `Soothing & anti-inflammatory (${flags.soothing.slice(0, 3).join(', ')})` : `Beruhigend & antientzündlich (${flags.soothing.slice(0, 3).join(', ')})`); }
+  if (flags.humectant.length) { score += 4; reasons.push(isEn ? `Humectants / NMF (${flags.humectant.slice(0, 3).join(', ')})` : `Feuchthalter / NMF (${flags.humectant.slice(0, 3).join(', ')})`); }
+  if (flags.mildSurfactant.length) { score += 5; reasons.push(isEn ? 'Gentle, barrier-friendly surfactants' : 'Milde, barrierefreundliche Tenside'); }
   if (flags.sebumActive.length && (isOilyProne || hasCond('rosacea') || hasCond('pih'))) {
     score += 8;
-    reasons.push(`Talg-/Rötungs-/PIH-Wirkstoffe (${flags.sebumActive.slice(0, 3).join(', ')})`);
+    reasons.push(isEn ? `Sebum/redness/PIH actives (${flags.sebumActive.slice(0, 3).join(', ')})` : `Talg-/Rötungs-/PIH-Wirkstoffe (${flags.sebumActive.slice(0, 3).join(', ')})`);
   }
   if (flags.lightLipid.length && !flags.heavyLipidHigh.length && (isOilyProne || skinType === 'normal')) {
     score += 4;
-    reasons.push('Leichte, nicht-komedogene Lipidbasis');
+    reasons.push(isEn ? 'Lightweight, non-comedogenic lipid base' : 'Leichte, nicht-komedogene Lipidbasis');
   }
   if (showerOilWarning) { score -= 25; warnings.push(showerOilWarning); }
-  if (flags.blenderWarnings.length) { score -= 8; warnings.push(`Kernwirkstoff hinter 1-%-Linie (evtl. zu niedrig dosiert): ${flags.blenderWarnings.join(', ')}.`); }
+  if (flags.blenderWarnings.length) {
+    score -= 8;
+    warnings.push(isEn
+      ? `Key active below the 1% line (possibly under-dosed): ${flags.blenderWarnings.join(', ')}.`
+      : `Kernwirkstoff hinter 1-%-Linie (evtl. zu niedrig dosiert): ${flags.blenderWarnings.join(', ')}.`);
+  }
 
   score = Math.max(5, Math.min(100, score));
 
-  // --- ALLGEMEINE 5-HAUTTYPEN-MATRIX (für „Zu welchem Hauttyp passt es?“) ---
-  const skinTypes = buildSkinTypeMatrix(flags, detectedCategory, showerOilWarning);
-
-  // --- PFLEGEPLAN-EINORDNUNG ---
-  const routinePlacement = buildRoutinePlacement({
-    skinType,
-    conditions,
-    detectedCategory,
-    flags,
-    score,
-    userPlan
-  });
-
-  const verdict = scoreToVerdict(score);
+  const skinTypes = buildSkinTypeMatrix(flags, detectedCategory, showerOilWarning, lang);
+  const routinePlacement = buildRoutinePlacement({ skinType, conditions, detectedCategory, flags, score, userPlan, lang });
+  const verdict = scoreToVerdict(score, lang);
 
   return {
-    productName: productName.trim() || 'Unbenanntes Produkt',
+    productName: productName.trim() || (isEn ? 'Unnamed Product' : 'Unbenanntes Produkt'),
     category: detectedCategory,
-    categoryLabel: CATEGORY_LABELS[detectedCategory] || 'Hautpflege',
+    categoryLabel: pickLang(CATEGORY_LABELS[detectedCategory], lang) || (isEn ? 'Skincare' : 'Hautpflege'),
     sourceUrl,
     skinProfile: { skinType, conditions },
     profileLabel,
@@ -414,7 +395,7 @@ export function analyzeInci({
     routinePlacement,
     anchorFound: anchorIndex >= 0,
     anchorPos: anchorIndex >= 0 ? anchorIndex + 1 : null,
-    anchorLabel: anchorInfo ? anchorInfo.label : null,
+    anchorLabel: anchorInfo ? pickLang(anchorInfo.label, lang) : null,
     totalCount: items.length,
     breakdown,
     rawInci: items.join(', '),
@@ -422,7 +403,8 @@ export function analyzeInci({
   };
 }
 
-function buildSkinTypeMatrix(flags, detectedCategory, showerOilWarning) {
+function buildSkinTypeMatrix(flags, detectedCategory, showerOilWarning, lang = 'de') {
+  const isEn = lang === 'en';
   const clamp = (n) => Math.max(5, Math.min(100, n));
 
   let normal = 85;
@@ -460,98 +442,161 @@ function buildSkinTypeMatrix(flags, detectedCategory, showerOilWarning) {
   sensitive = clamp(sensitive);
 
   return [
-    { id: 'normal', name: 'Normale Haut', score: normal, verdict: scoreToVerdict(normal), note: normal >= 75 ? 'Gut geeignet für die tägliche Basispflege.' : 'Enthält unnötig austrocknende/reizende Stoffe.' },
-    { id: 'dry', name: 'Trockene Haut / Barriereschutz', score: dry, verdict: scoreToVerdict(dry), note: flags.heavyLipidHigh.length || flags.barrier.length ? 'Pflegend & lipidergänzend.' : 'Eher leicht – im Winter ggf. kombinieren.' },
-    { id: 'oily', name: 'Fettige Haut / Seborrhoe / Unrein', score: oily, verdict: scoreToVerdict(oily), note: flags.heavyLipidHigh.length ? 'Für fettige Gesichtshaut tagsüber oft zu schwer.' : 'Leicht & gut verträglich.' },
-    { id: 'combination', name: 'Mischhaut', score: combo, verdict: scoreToVerdict(combo), note: flags.heavyLipidHigh.length ? 'Eher für trockene Wangen als für die T-Zone.' : 'Ausgewogen für T-Zone & Wangen.' },
-    { id: 'sensitive', name: 'Empfindliche Haut / Psoriasis / Rosazea', score: sensitive, verdict: scoreToVerdict(sensitive), note: sensitive >= 75 ? 'Reizarm & barrierefreundlich.' : 'Wegen Duft-, Alkohol- oder Reizstoffen meiden.' }
+    {
+      id: 'normal',
+      name: isEn ? 'Normal Skin' : 'Normale Haut',
+      score: normal,
+      verdict: scoreToVerdict(normal, lang),
+      note: normal >= 75
+        ? (isEn ? 'Well suited for daily baseline care.' : 'Gut geeignet für die tägliche Basispflege.')
+        : (isEn ? 'Contains unnecessarily drying/irritating ingredients.' : 'Enthält unnötig austrocknende/reizende Stoffe.')
+    },
+    {
+      id: 'dry',
+      name: isEn ? 'Dry Skin / Barrier Support' : 'Trockene Haut / Barriereschutz',
+      score: dry,
+      verdict: scoreToVerdict(dry, lang),
+      note: flags.heavyLipidHigh.length || flags.barrier.length
+        ? (isEn ? 'Nourishing & lipid-replenishing.' : 'Pflegend & lipidergänzend.')
+        : (isEn ? 'Lighter formula – layer with a richer cream in winter if needed.' : 'Eher leicht – im Winter ggf. kombinieren.')
+    },
+    {
+      id: 'oily',
+      name: isEn ? 'Oily / Seborrhea / Blemish-Prone' : 'Fettige Haut / Seborrhoe / Unrein',
+      score: oily,
+      verdict: scoreToVerdict(oily, lang),
+      note: flags.heavyLipidHigh.length
+        ? (isEn ? 'Often too heavy for oily facial skin during the day.' : 'Für fettige Gesichtshaut tagsüber oft zu schwer.')
+        : (isEn ? 'Lightweight & well tolerated.' : 'Leicht & gut verträglich.')
+    },
+    {
+      id: 'combination',
+      name: isEn ? 'Combination Skin' : 'Mischhaut',
+      score: combo,
+      verdict: scoreToVerdict(combo, lang),
+      note: flags.heavyLipidHigh.length
+        ? (isEn ? 'Better suited for dry cheeks than the oily T-zone.' : 'Eher für trockene Wangen als für die T-Zone.')
+        : (isEn ? 'Balanced for both T-zone and cheeks.' : 'Ausgewogen für T-Zone & Wangen.')
+    },
+    {
+      id: 'sensitive',
+      name: isEn ? 'Sensitive / Psoriasis / Rosacea' : 'Empfindliche Haut / Psoriasis / Rosazea',
+      score: sensitive,
+      verdict: scoreToVerdict(sensitive, lang),
+      note: sensitive >= 75
+        ? (isEn ? 'Low-irritation & barrier-friendly.' : 'Reizarm & barrierefreundlich.')
+        : (isEn ? 'Avoid due to fragrance, drying alcohol, or irritants.' : 'Wegen Duft-, Alkohol- oder Reizstoffen meiden.')
+    }
   ];
 }
 
-function scoreToVerdict(score) {
-  if (score >= 80) return { label: 'Passt sehr gut', cls: 'badge-ok', emoji: '✅' };
-  if (score >= 58) return { label: 'Bedingt geeignet', cls: 'badge-warn', emoji: '⚠️' };
-  return { label: 'Lieber meiden', cls: 'badge-bad', emoji: '🚫' };
+function scoreToVerdict(score, lang = 'de') {
+  const isEn = lang === 'en';
+  if (score >= 80) return { label: isEn ? 'Great match' : 'Passt sehr gut', cls: 'badge-ok', emoji: '✅' };
+  if (score >= 58) return { label: isEn ? 'Use with caution' : 'Bedingt geeignet', cls: 'badge-warn', emoji: '⚠️' };
+  return { label: isEn ? 'Better avoid' : 'Lieber meiden', cls: 'badge-bad', emoji: '🚫' };
 }
 
-function buildRoutinePlacement({ skinType, conditions, detectedCategory, flags, score, userPlan = [] }) {
+function buildRoutinePlacement({ skinType, conditions, detectedCategory, flags, score, userPlan = [], lang = 'de' }) {
+  const isEn = lang === 'en';
   const hasCond = (c) => conditions.includes(c);
 
-  // Empfohlenen Standard-Slot bestimmen
   let slotId = 'pm_care';
-  let slot = 'Abends – Nachtpflege / Creme';
-  let advice = 'Dünn auftragen und die Reaktion deiner Haut beobachten.';
+  let slot = isEn ? 'Evening – Night Moisturizer' : 'Abends – Nachtpflege / Creme';
+  let advice = isEn ? 'Apply thinly and observe how your skin responds.' : 'Dünn auftragen und die Reaktion deiner Haut beobachten.';
 
   if (detectedCategory === 'cleanser') {
     slotId = 'am_cleanse';
-    slot = 'Morgens & Abends – Reinigung';
-    advice = 'Lauwarm reinigen und sanft trocken tupfen (nicht rubbeln).' + (skinType === 'oily' || hasCond('seborrhoe') ? ' Abends bei wasserfestem LSF ideal als 2. Schritt nach einem Reinigungsöl.' : '');
+    slot = isEn ? 'Morning & Evening – Cleanser' : 'Morgens & Abends – Reinigung';
+    advice = isEn
+      ? 'Cleanse with lukewarm water and pat dry gently (do not rub).' + (skinType === 'oily' || hasCond('seborrhoe') ? ' At night, great as step 2 after a cleansing oil to remove water-resistant SPF.' : '')
+      : 'Lauwarm reinigen und sanft trocken tupfen (nicht rubbeln).' + (skinType === 'oily' || hasCond('seborrhoe') ? ' Abends bei wasserfestem LSF ideal als 2. Schritt nach einem Reinigungsöl.' : '');
   } else if (detectedCategory === 'shower_oil') {
     slotId = 'body';
-    slot = 'Körper – Dusche';
-    advice = 'Lauwarm (35–37 °C) duschen und danach direkt innerhalb von 3 Minuten eincremen (Soak & Seal).';
+    slot = isEn ? 'Body – Shower Wash' : 'Körper – Dusche';
+    advice = isEn
+      ? 'Shower lukewarm (35–37 °C) and moisturize within 3 minutes afterward (Soak & Seal).'
+      : 'Lauwarm (35–37 °C) duschen und danach direkt innerhalb von 3 Minuten eincremen (Soak & Seal).';
   } else if (detectedCategory === 'sunscreen') {
     slotId = 'am_care';
-    slot = 'Morgens – UV-Schutz (letzter Schritt)';
-    advice = 'Großzügig auftragen (ca. 2 Fingerlängen fürs Gesicht).' + (skinType === 'oily' || hasCond('seborrhoe') ? ' Ersetzt morgens bei fettiger Haut die Tagescreme – abends gründlich abwaschen.' : ' Schützt zuverlässig vor UV-Triggern & Pigmentflecken.');
+    slot = isEn ? 'Morning – UV Protection (Final Step)' : 'Morgens – UV-Schutz (letzter Schritt)';
+    advice = isEn
+      ? 'Apply generously (~2 finger lengths for the face).' + (skinType === 'oily' || hasCond('seborrhoe') ? ' Replaces morning moisturizer on oily skin – wash off thoroughly at night.' : ' Protects reliably against UV triggers & dark spots.')
+      : 'Großzügig auftragen (ca. 2 Fingerlängen fürs Gesicht).' + (skinType === 'oily' || hasCond('seborrhoe') ? ' Ersetzt morgens bei fettiger Haut die Tagescreme – abends gründlich abwaschen.' : ' Schützt zuverlässig vor UV-Triggern & Pigmentflecken.');
   } else if (detectedCategory === 'serum') {
     if (flags.keratolytic.length) {
       slotId = 'pm_treatment';
-      slot = 'Abends – Wirkstoff-Serum / Spot-Treatment';
-      advice = 'Auf geschlossene Haut auftragen.' + (flags.stingTriggers.length ? ' Nicht auf offene oder gereizte Stellen geben (Brenn-Gefahr)!' : '');
+      slot = isEn ? 'Evening – Active Serum / Spot Treatment' : 'Abends – Wirkstoff-Serum / Spot-Treatment';
+      advice = isEn
+        ? 'Apply to intact skin.' + (flags.stingTriggers.length ? ' Avoid open or cracked areas (stinging risk)!' : '')
+        : 'Auf geschlossene Haut auftragen.' + (flags.stingTriggers.length ? ' Nicht auf offene oder gereizte Stellen geben (Brenn-Gefahr)!' : '');
     } else {
       slotId = 'am_serum';
-      slot = 'Morgens & Abends – Serum / Wirkstoff';
-      advice = '2–3 Tropfen auf die noch leicht feuchte Haut auftragen und danach mit Creme oder LSF einschließen.';
+      slot = isEn ? 'Morning & Evening – Serum / Active' : 'Morgens & Abends – Serum / Wirkstoff';
+      advice = isEn
+        ? 'Apply 2–3 drops to slightly damp skin, then seal with moisturizer or SPF.'
+        : '2–3 Tropfen auf die noch leicht feuchte Haut auftragen und danach mit Creme oder LSF einschließen.';
     }
   } else if (detectedCategory === 'exfoliant') {
     slotId = 'pm_treatment';
-    slot = 'Abends – Chemisches Peeling (1–3x pro Woche)';
-    advice = 'Langsam einschleichen, nicht mit anderen starken Säuren/Urea am selben Abend kombinieren und morgens LSF 50 nutzen.';
+    slot = isEn ? 'Evening – Chemical Exfoliant (1–3x/week)' : 'Abends – Chemisches Peeling (1–3x pro Woche)';
+    advice = isEn
+      ? 'Introduce gradually, do not layer with other strong acids/urea on the same night, and wear SPF 50 in the morning.'
+      : 'Langsam einschleichen, nicht mit anderen starken Säuren/Urea am selben Abend kombinieren und morgens LSF 50 nutzen.';
   } else if (detectedCategory === 'moisturizer') {
-    if (flags.heavyLipidHigh.length) {
-      slotId = 'pm_care';
-      slot = 'Abends – Reichhaltige Nachtpflege / Barriere-Creme';
-      advice = 'Ideal als schützender Abschluss abends oder im Winter über einem Serum.';
-    } else {
-      slotId = 'pm_care';
-      slot = 'Morgens (unter LSF) und/oder Abends – Gesichtscreme';
-      advice = 'Leichte Pflege nach dem Serum auftragen.';
-    }
+    slotId = 'pm_care';
+    slot = flags.heavyLipidHigh.length
+      ? (isEn ? 'Evening – Rich Night / Barrier Cream' : 'Abends – Reichhaltige Nachtpflege / Barriere-Creme')
+      : (isEn ? 'Morning (under SPF) and/or Evening – Moisturizer' : 'Morgens (unter LSF) und/oder Abends – Gesichtscreme');
+    advice = flags.heavyLipidHigh.length
+      ? (isEn ? 'Ideal as a protective final layer at night or in winter over a serum.' : 'Ideal als schützender Abschluss abends oder im Winter über einem Serum.')
+      : (isEn ? 'Apply lightweight care after your serum.' : 'Leichte Pflege nach dem Serum auftragen.');
   } else if (detectedCategory === 'body_lotion') {
     slotId = 'body';
-    slot = 'Körper – Tägliche Basistherapie (nach dem Duschen)';
-    advice = 'Direkt innerhalb von 3 Minuten nach dem Duschen auf die noch leicht feuchte Haut auftragen (Soak & Seal).';
+    slot = isEn ? 'Body – Daily Moisturizer (After Shower)' : 'Körper – Tägliche Basistherapie (nach dem Duschen)';
+    advice = isEn
+      ? 'Apply within 3 minutes after showering to slightly damp skin (Soak & Seal).'
+      : 'Direkt innerhalb von 3 Minuten nach dem Duschen auf die noch leicht feuchte Haut auftragen (Soak & Seal).';
   } else if (detectedCategory === 'ointment') {
     slotId = 'sos';
-    slot = 'Spezial- / SOS-Pflege (punktuell & über Nacht)';
-    advice = 'Versiegelt Feuchtigkeit auf trockenen, schuppigen oder rissigen Stellen („Slugging“).';
+    slot = isEn ? 'Special / SOS Care (Spot & Overnight)' : 'Spezial- / SOS-Pflege (punktuell & über Nacht)';
+    advice = isEn
+      ? 'Seals in moisture on dry, scaly, or cracked areas (“slugging”).'
+      : 'Versiegelt Feuchtigkeit auf trockenen, schuppigen oder rissigen Stellen („Slugging“).';
   } else if (detectedCategory === 'shampoo') {
     slotId = 'hair';
-    slot = 'Kopfhaut & Haare – Haarwäsche';
+    slot = isEn ? 'Scalp & Hair – Wash' : 'Kopfhaut & Haare – Haarwäsche';
     advice = hasCond('curly_oily')
-      ? 'Nur auf die Kopfhaut/den Ansatz geben (CWC-Methode: vorher trockene Spitzen mit Spülung schützen).'
-      : 'Sanft mit den Fingerkuppen einmassieren, nicht kratzen.';
+      ? (isEn ? 'Apply only to the scalp/roots (CWC method: coat dry ends with conditioner first).' : 'Nur auf die Kopfhaut/den Ansatz geben (CWC-Methode: vorher trockene Spitzen mit Spülung schützen).')
+      : (isEn ? 'Massage gently with fingertips, never scratch with nails.' : 'Sanft mit den Fingerkuppen einmassieren, nicht kratzen.');
   } else if (detectedCategory === 'conditioner') {
     slotId = 'hair';
-    slot = 'Haare – Längen & Spitzen';
+    slot = isEn ? 'Hair – Lengths & Ends' : 'Haare – Längen & Spitzen';
     advice = hasCond('curly_oily')
-      ? 'Strikt ab Ohrhöhe abwärts in die Längen & Spitzen geben – niemals an den fettigen Ansatz!'
-      : 'Nach dem Waschen in Längen und Spitzen einarbeiten.';
+      ? (isEn ? 'Apply strictly from ear-level down to lengths & ends – never to oily roots!' : 'Strikt ab Ohrhöhe abwärts in die Längen & Spitzen geben – niemals an den fettigen Ansatz!')
+      : (isEn ? 'Work into lengths and ends after washing.' : 'Nach dem Waschen in Längen und Spitzen einarbeiten.');
   } else if (detectedCategory === 'lip_balm') {
     slotId = 'sos';
-    slot = 'Lippenpflege (nach Bedarf)';
-    advice = 'Tagsüber und bei Sonne/Kälte zum Schutz der Lippenbarriere nutzen.';
+    slot = isEn ? 'Lip Care (As Needed)' : 'Lippenpflege (nach Bedarf)';
+    advice = isEn
+      ? 'Use throughout the day and in sun/cold to protect the lip barrier.'
+      : 'Tagsüber und bei Sonne/Kälte zum Schutz der Lippenbarriere nutzen.';
   }
 
   if (score < 55) {
-    advice = '⚠️ Für dein gewähltes Hautprofil wegen der erkannten Reizstoffe/Textur eher nicht empfohlen. ' + advice;
+    advice = (isEn
+      ? '⚠️ Not recommended for your selected skin profile due to detected irritants or texture. '
+      : '⚠️ Für dein gewähltes Hautprofil wegen der erkannten Reizstoffe/Textur eher nicht empfohlen. ') + advice;
   }
 
   const sameSlotItems = (userPlan || []).filter((p) => p.slotId === slotId);
   const existingMatch = sameSlotItems.length
-    ? `In diesem Schritt hast du bereits gespeichert: ${sameSlotItems.map((p) => p.productName).join(', ')}.`
-    : 'Dieser Schritt ist in deinem persönlichen Pflegeplan noch frei – du kannst das Produkt unten direkt hinzufügen.';
+    ? (isEn
+        ? `Already saved in this step: ${sameSlotItems.map((p) => p.productName).join(', ')}.`
+        : `In diesem Schritt hast du bereits gespeichert: ${sameSlotItems.map((p) => p.productName).join(', ')}.`)
+    : (isEn
+        ? 'This step is still open in your routine – you can add this product directly below.'
+        : 'Dieser Schritt ist in deinem persönlichen Pflegeplan noch frei – du kannst das Produkt unten direkt hinzufügen.');
 
   return { slotId, slot, advice, existingMatch };
 }
