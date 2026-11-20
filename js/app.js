@@ -1,6 +1,5 @@
 import {
   PROFILES,
-  PROFILE_PRESETS,
   SAMPLE_PRODUCTS,
   SKIN_CONDITIONS,
   SKIN_TYPES,
@@ -25,6 +24,7 @@ const state = {
   settings: loadSettings(),
   history: loadHistory(),
   currentPhoto: null, // { base64Data, mimeType, previewUrl }
+  cameraStream: null,
   lastAnalysis: null,
   lastAiSummary: '',
   deferredPrompt: null
@@ -137,22 +137,6 @@ function initSkinProfileSelector() {
       onSkinProfileChanged();
     });
   });
-
-  document.querySelectorAll('.preset-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      applyPreset(btn.dataset.preset);
-    });
-  });
-}
-
-function applyPreset(presetId) {
-  const preset = PROFILE_PRESETS[presetId];
-  if (!preset) return;
-  state.settings.skinProfile = {
-    skinType: preset.skinType,
-    conditions: [...preset.conditions]
-  };
-  onSkinProfileChanged();
 }
 
 function onSkinProfileChanged() {
@@ -204,23 +188,10 @@ function bindNavigation() {
       switchView(target);
     });
   });
-
-  document.getElementById('quick-profile-switch').addEventListener('click', () => {
-    const isAlex = matchesPreset('alex');
-    applyPreset(isAlex ? 'partner' : 'alex');
-  });
-}
-
-function matchesPreset(presetId) {
-  const preset = PROFILE_PRESETS[presetId];
-  if (!preset) return false;
-  const sp = state.settings.skinProfile;
-  if (sp.skinType !== preset.skinType) return false;
-  if (sp.conditions.length !== preset.conditions.length) return false;
-  return preset.conditions.every((c) => sp.conditions.includes(c));
 }
 
 function switchView(viewName) {
+  if (viewName !== 'scan') stopLiveCamera();
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
   document.getElementById(`view-${viewName}`).classList.add('active');
   document.querySelectorAll('.nav-item').forEach((n) => {
@@ -234,10 +205,6 @@ function syncProfileUI() {
   const label = formatSkinProfileLabel(sp);
   document.getElementById('header-profile-label').textContent = label;
 
-  const isAlex = matchesPreset('alex');
-  const isPartner = matchesPreset('partner');
-  document.getElementById('profile-chip-text').textContent = isAlex ? 'Alex' : isPartner ? 'Freundin' : 'Eigene';
-
   // Dropdown & Checkboxes synchronisieren
   const selectEl = document.getElementById('select-skin-type');
   if (selectEl) selectEl.value = sp.skinType;
@@ -247,10 +214,6 @@ function syncProfileUI() {
     const isChecked = sp.conditions.includes(chip.dataset.condId);
     if (cb) cb.checked = isChecked;
     chip.classList.toggle('checked', isChecked);
-  });
-
-  document.querySelectorAll('.preset-btn').forEach((btn) => {
-    btn.classList.toggle('active', matchesPreset(btn.dataset.preset));
   });
 
   const planId = getMatchingPlanId();
@@ -273,6 +236,7 @@ function bindModeTabs() {
   document.querySelectorAll('.mode-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const mode = tab.dataset.mode;
+      if (mode !== 'photo') stopLiveCamera();
       document.querySelectorAll('.mode-tab').forEach((t) => {
         t.classList.toggle('active', t === tab);
         t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
@@ -285,14 +249,89 @@ function bindModeTabs() {
   });
 }
 
+async function openLiveCamera() {
+  hideError();
+  const fallbackInput = document.getElementById('input-camera-fallback');
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    fallbackInput.click();
+    return;
+  }
+
+  try {
+    stopLiveCamera();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
+      audio: false
+    });
+    state.cameraStream = stream;
+    const video = document.getElementById('camera-video');
+    video.srcObject = stream;
+    await video.play();
+    document.getElementById('photo-preview-wrap').classList.add('hidden');
+    document.getElementById('camera-live-wrap').classList.remove('hidden');
+  } catch (err) {
+    // Falls Kamera-Berechtigung blockiert oder kein HTTPS: Fallback auf System-Kamera
+    if (err.name === 'NotAllowedError') {
+      showError('Kamera-Zugriff wurde blockiert. Bitte erlaube den Kamera-Zugriff in den Browser-Einstellungen oder wähle ein Foto über „Galerie“.');
+    } else {
+      fallbackInput.click();
+    }
+  }
+}
+
+function stopLiveCamera() {
+  if (state.cameraStream) {
+    state.cameraStream.getTracks().forEach((t) => t.stop());
+    state.cameraStream = null;
+  }
+  const video = document.getElementById('camera-video');
+  if (video) video.srcObject = null;
+  const wrap = document.getElementById('camera-live-wrap');
+  if (wrap) wrap.classList.add('hidden');
+}
+
+function captureLiveFrame() {
+  const video = document.getElementById('camera-video');
+  if (!video || !video.videoWidth || !video.videoHeight) {
+    showError('Kamera ist noch nicht bereit. Bitte einen Moment warten.');
+    return;
+  }
+  const maxDim = 1600;
+  let width = video.videoWidth;
+  let height = video.videoHeight;
+  if (width > maxDim || height > maxDim) {
+    const scale = maxDim / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, width, height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+  const base64Data = dataUrl.split(',')[1];
+
+  stopLiveCamera();
+  state.currentPhoto = { base64Data, mimeType: 'image/jpeg', previewUrl: dataUrl };
+  document.getElementById('photo-preview').src = dataUrl;
+  document.getElementById('photo-preview-wrap').classList.remove('hidden');
+}
+
 function bindScanControls() {
-  const cameraInput = document.getElementById('input-camera');
+  const cameraFallback = document.getElementById('input-camera-fallback');
   const galleryInput = document.getElementById('input-gallery');
 
   const onFileSelected = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     hideError();
+    stopLiveCamera();
     try {
       setLoading(true, 'Bereite Foto vor…');
       const compressed = await compressImageFile(file);
@@ -307,7 +346,12 @@ function bindScanControls() {
     }
   };
 
-  cameraInput.addEventListener('change', onFileSelected);
+  document.getElementById('btn-open-camera').addEventListener('click', openLiveCamera);
+  document.getElementById('btn-capture-frame').addEventListener('click', captureLiveFrame);
+  document.getElementById('btn-close-camera').addEventListener('click', stopLiveCamera);
+  window.addEventListener('pagehide', stopLiveCamera);
+
+  cameraFallback.addEventListener('change', onFileSelected);
   galleryInput.addEventListener('change', onFileSelected);
 
   document.getElementById('btn-clear-photo').addEventListener('click', () => {

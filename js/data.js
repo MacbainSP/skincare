@@ -36,8 +36,8 @@ export function formatSkinProfileLabel(skinProfile) {
 export const PROFILES = {
   alex: {
     id: 'alex',
-    shortName: 'Alex',
-    title: 'Alex – Normaler Hauttyp + Psoriasis vulgaris',
+    shortName: 'Psoriasis',
+    title: 'Normaler Hauttyp + Psoriasis vulgaris',
     subtitle: 'Zonen-Management · Barriere-Schutz · 0 % Parfum',
     summary:
       'Normaler Grundhauttyp im Gesicht (braucht leichte O/W-Emulsionen ohne Porenstau), aber genetische Psoriasis-Bereitschaft (Koebner-Effekt!). Plaques brauchen gezielte Keratolyse (Urea/AHA/BHA) + Lipidersatz, offene/rissige Stellen strikt brennfreie Pflege (Panthenol, Totes Meer, Ceramide).',
@@ -96,8 +96,8 @@ export const PROFILES = {
 
   partner: {
     id: 'partner',
-    shortName: 'Freundin',
-    title: 'Freundin – Fettige Haut (Seborrhoe) & dunkle Locken',
+    shortName: 'Fettig & Locken',
+    title: 'Fettige Haut (Seborrhoe) & dunkle Locken',
     subtitle: 'Talgregulierung · Non-komedogen · CWC-Haarroutine (dm)',
     summary:
       'Überaktive Talgdrüsen (Glanz, vergrößerte Poren, Neigung zu Pickelmalen/PIH bei dunklem Haartyp). Braucht milde Reinigung + Double Cleansing abends, Azelain/Niacinamid + 2% BHA, leichte Gele statt schwerer Sheabutter-Cremes. Haare: Zonen-Pflege (CWC) für fettigen Ansatz & trockene Lockenspitzen.',

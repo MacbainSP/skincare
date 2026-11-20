@@ -24,10 +24,6 @@
           <p class="app-subtitle" id="header-profile-label">Normal + Psoriasis</p>
         </div>
       </div>
-      <button class="profile-chip" id="quick-profile-switch" type="button" title="Schnellwechsel Alex / Freundin">
-        <span id="profile-chip-text">Alex</span>
-        <span class="chip-swap" aria-hidden="true">⇄</span>
-      </button>
     </header>
 
     <!-- Main Scrollable Content -->
@@ -38,10 +34,6 @@
         <div class="card profile-selector-card">
           <div class="profile-selector-head">
             <h2 style="margin:0;">🧬 Hautprofil wählen</h2>
-            <div class="preset-pills">
-              <button class="preset-btn" data-preset="alex" type="button">Alex</button>
-              <button class="preset-btn" data-preset="partner" type="button">Freundin</button>
-            </div>
           </div>
 
           <div class="field-group" style="margin-top:10px; margin-bottom:10px;">
@@ -68,14 +60,28 @@
               Fotografiere die <strong>INCI-Liste</strong> auf der Rückseite des Produkts (oder wähle ein Foto aus der Galerie).
             </p>
             <div class="photo-actions">
-              <label class="btn btn-primary btn-large" for="input-camera">
+              <button id="btn-open-camera" class="btn btn-primary btn-large" type="button">
                 <span>📸 Kamera öffnen</span>
-                <input id="input-camera" type="file" accept="image/*" capture="environment" hidden />
-              </label>
+              </button>
               <label class="btn btn-secondary" for="input-gallery">
                 <span>🖼️ Galerie</span>
                 <input id="input-gallery" type="file" accept="image/*" hidden />
               </label>
+              <input id="input-camera-fallback" type="file" accept="image/*" capture="environment" hidden />
+            </div>
+
+            <!-- In-App Live Camera Viewfinder (zuverlässig in Firefox & Chrome Android) -->
+            <div id="camera-live-wrap" class="camera-live-wrap hidden">
+              <div class="camera-stage">
+                <video id="camera-video" autoplay playsinline muted></video>
+                <div class="camera-guide" aria-hidden="true">
+                  <span>INCI-Liste hier scharf ausrichten</span>
+                </div>
+              </div>
+              <div class="camera-controls">
+                <button id="btn-capture-frame" class="btn btn-primary btn-large" type="button">📸 Auslösen</button>
+                <button id="btn-close-camera" class="btn btn-ghost" type="button">✕ Schließen</button>
+              </div>
             </div>
             <div id="photo-preview-wrap" class="photo-preview-wrap hidden">
               <img id="photo-preview" alt="Vorschau des Produktfotos" />
@@ -157,8 +163,8 @@
       <!-- VIEW 2: PFLEGEPLAN -->
       <section id="view-plan" class="view" aria-label="Pflegeplan">
         <div class="segment-control">
-          <button class="segment-btn active" data-plan-profile="alex" type="button">Alex (Psoriasis)</button>
-          <button class="segment-btn" data-plan-profile="partner" type="button">Freundin (Fettig &amp; Locken)</button>
+          <button class="segment-btn active" data-plan-profile="alex" type="button">Psoriasis-Routine</button>
+          <button class="segment-btn" data-plan-profile="partner" type="button">Fettige Haut &amp; Locken</button>
         </div>
         <div id="plan-content"></div>
       </section>

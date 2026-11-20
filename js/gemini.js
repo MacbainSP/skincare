@@ -146,16 +146,18 @@ export async function testOrAutoSelectModel(apiKey, preferredModel) {
 }
 
 /**
- * Komprimiert ein Foto im Browser (max. 1600px, JPEG 0.85), damit Handy-Fotos schnell hochgeladen werden.
+ * Komprimiert ein Foto im Browser (max. 1600px, JPEG 0.86) speicherschonend via ObjectURL.
  */
 export function compressImageFile(file, maxDim = 1600) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Foto konnte nicht gelesen werden.'));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('Bildformat wird nicht unterstützt.'));
-      img.onload = () => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Bildformat wird nicht unterstützt oder konnte nicht geladen werden.'));
+    };
+    img.onload = () => {
+      try {
         let { width, height } = img;
         if (width > maxDim || height > maxDim) {
           const scale = maxDim / Math.max(width, height);
@@ -169,11 +171,14 @@ export function compressImageFile(file, maxDim = 1600) {
         ctx.drawImage(img, 0, 0, width, height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.86);
         const base64Data = dataUrl.split(',')[1];
+        URL.revokeObjectURL(objectUrl);
         resolve({ base64Data, mimeType: 'image/jpeg', previewUrl: dataUrl });
-      };
-      img.src = reader.result;
+      } catch (err) {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Foto konnte nicht verarbeitet werden.'));
+      }
     };
-    reader.readAsDataURL(file);
+    img.src = objectUrl;
   });
 }
 
@@ -209,9 +214,58 @@ Antworte ausschließlich als JSON-Objekt mit den Schlüsseln: productName, categ
 }
 
 /**
+ * Holt Seitentext über öffentliche, CORS-fähige Read-Proxies (für GitHub Pages / Handy ohne lokalen Server).
+ */
+async function fetchPageTextViaCorsProxy(targetUrl) {
+  const candidates = [
+    {
+      url: `https://r.jina.ai/${targetUrl}`,
+      headers: { Accept: 'text/plain' }
+    },
+    {
+      url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+      headers: {}
+    }
+  ];
+
+  for (const c of candidates) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch(c.url, { headers: c.headers, signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (text && text.length > 200) {
+        // HTML ggf. grob bereinigen
+        const cleaned = text.includes('<html') || text.includes('<body')
+          ? text
+              .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+              .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+              .replace(/<[^>]+>/g, '\n')
+              .replace(/[ \t]+/g, ' ')
+              .replace(/\n{2,}/g, '\n')
+          : text;
+        // Relevante Passage rund um Inhaltsstoffe/Ingredients herausschneiden
+        const match = cleaned.match(/inhaltsstoffe|ingredients|bestandteile|aqua\s*,/i);
+        if (match && match.index !== undefined) {
+          const start = Math.max(0, match.index - 400);
+          return cleaned.slice(start, start + 7000);
+        }
+        return cleaned.slice(0, 7000);
+      }
+    } catch {
+      // nächsten Proxy probieren
+    }
+  }
+  return '';
+}
+
+/**
  * Holt Produktname + INCI-Liste von einer URL:
  * 1) Zuerst über den lokalen Python-Proxy (/api/fetch-url)
- * 2) Falls unvollständig oder offline vom Proxy: Fallback über Gemini mit Google Search Grounding
+ * 2) Auf GitHub Pages / Handy über CORS-fähige Reader-Proxies (r.jina.ai / allorigins)
+ * 3) Extraktion mit normalem Gemini generateContent (OHNE google_search-Tool, daher kein 429-Free-Tier-Limit!)
  */
 export async function extractFromUrl({ url, apiKey, model, skinProfile }) {
   const trimmedUrl = (url || '').trim();
@@ -223,10 +277,13 @@ export async function extractFromUrl({ url, apiKey, model, skinProfile }) {
   try {
     const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(trimmedUrl)}`);
     if (res.ok) {
-      proxyResult = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        proxyResult = await res.json();
+      }
     }
   } catch {
-    // Kein lokaler Proxy aktiv (z. B. statisches Hosting) -> Fallback auf Gemini Search
+    // Kein lokaler Proxy aktiv (z. B. GitHub Pages)
   }
 
   if (proxyResult && proxyResult.rawInci && proxyResult.rawInci.length > 25) {
@@ -253,40 +310,53 @@ export async function extractFromUrl({ url, apiKey, model, skinProfile }) {
     };
   }
 
-  if (apiKey && apiKey.trim()) {
-    const { label, details } = describeSkinProfile(skinProfile);
-    const contextSnippet = proxyResult?.snippet
-      ? `\n\nAuszug der Webseite:\n${proxyResult.snippet.slice(0, 6000)}`
-      : '';
+  // Stufe 2: Öffentlicher CORS-Proxy (für GitHub Pages / Android unterwegs)
+  let pageSnippet = proxyResult?.snippet || '';
+  if (!pageSnippet) {
+    pageSnippet = await fetchPageTextViaCorsProxy(trimmedUrl);
+  }
 
-    const prompt = `Finde den Produktnamen und die offizielle, vollständige INCI-Liste (Ingredients) für dieses Kosmetikprodukt:
-URL: ${trimmedUrl}${contextSnippet}
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error(
+      'Für die automatische Link-Auswertung auf GitHub Pages bitte deinen kostenlosen Gemini API-Key im Tab „Setup“ eintragen (oder die INCI-Liste direkt im Tab „INCI-Text“ einfügen).'
+    );
+  }
 
-Gib die Antwort ausschließlich als JSON-Objekt zurück (ohne Markdown-Codeblock):
+  const { label, details } = describeSkinProfile(skinProfile);
+
+  if (pageSnippet) {
+    const prompt = `Extrahiere aus diesem Auszug einer Produktseite den Produktnamen und die vollständige, exakte INCI-Liste (Ingredients / Inhaltsstoffe).
+URL: ${trimmedUrl}
+
+Seitenauszug:
+${pageSnippet}
+
+Antworte ausschließlich als JSON-Objekt:
 {
   "productName": "Marke + Produktname",
   "category": "cleanser|serum|moisturizer|sunscreen|body_lotion|ointment|shower_oil|exfoliant|shampoo|conditioner|lip_balm|auto",
-  "rawInci": "Aqua, Glycerin, ...",
+  "rawInci": "Vollständige kommagetrennte INCI-Liste (oder leerer String, falls im Auszug keine INCI-Liste enthalten ist)",
   "aiSummary": "Kurze Einschätzung (3-4 Sätze auf Deutsch) für das Hautprofil: ${label} (${details})"
 }`;
 
     const text = await callGemini({
       apiKey,
       model,
-      useSearch: !contextSnippet,
-      jsonMode: Boolean(contextSnippet),
+      useSearch: false,
+      jsonMode: true,
       parts: [{ text: prompt }]
     });
 
     const parsed = parseJsonLoose(text);
     if (parsed.rawInci && parsed.rawInci.trim().length > 10) {
-      return { ...parsed, source: contextSnippet ? 'Proxy + Gemini' : 'Gemini Web-Suche' };
+      return { ...parsed, source: 'Web-Abruf + Gemini' };
     }
   }
 
+  // Falls der Shop alle Proxies blockiert hat (z. B. Cloudflare/Bot-Schutz), KEIN google_search erzwingen (das verursacht 429 im Free Tier),
+  // sondern sauber erklären, wie es sofort klappt.
   throw new Error(
-    proxyResult?.error ||
-      'Die INCI-Liste konnte nicht automatisch von dieser Shop-Seite ausgelesen werden. Tipp: Hinterlege einen Gemini API-Key im Tab „Setup“ oder kopiere die Inhaltsstoffe direkt in den Tab „INCI-Text“.'
+    'Dieser Online-Shop blockiert leider den automatischen Seitenabruf (Bot-Schutz). Kopiere die Inhaltsstoffe auf der Produktseite kurz in den Tab „📝 INCI-Text“ oder fotografiere die Rückseite im Tab „📷 Foto“.'
   );
 }
 
