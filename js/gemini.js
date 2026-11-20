@@ -1,8 +1,18 @@
-import { PROFILES } from './data.js';
+import { PROFILES, SKIN_TYPES, SKIN_CONDITIONS, formatSkinProfileLabel } from './data.js';
+
+function describeSkinProfile(skinProfile) {
+  const label = formatSkinProfileLabel(skinProfile);
+  const st = SKIN_TYPES.find((s) => s.id === skinProfile?.skinType) || SKIN_TYPES[0];
+  const conds = (skinProfile?.conditions || [])
+    .map((id) => SKIN_CONDITIONS.find((c) => c.id === id))
+    .filter(Boolean);
+  const details = [st.desc, ...conds.map((c) => `${c.label}: ${c.desc}`)].join(' ');
+  return { label, details, condIds: skinProfile?.conditions || [] };
+}
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-async function callGemini({ apiKey, model = 'gemini-2.5-flash', parts, useSearch = false, jsonMode = false }) {
+async function callGemini({ apiKey, model = 'gemini-flash-latest', parts, useSearch = false, jsonMode = false }) {
   if (!apiKey || !apiKey.trim()) {
     throw new Error('Bitte trage zuerst deinen kostenlosen Gemini API-Key im Tab „Setup“ ein.');
   }
@@ -61,6 +71,48 @@ function parseJsonLoose(text) {
   }
 }
 
+export async function listAvailableModels(apiKey) {
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error('Bitte zuerst einen Gemini API-Key eintragen.');
+  }
+  const url = `${GEMINI_BASE}?key=${encodeURIComponent(apiKey.trim())}&pageSize=100`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const errJson = await res.json();
+      detail = errJson?.error?.message || '';
+    } catch {
+      detail = await res.text();
+    }
+    throw new Error(`Modelle konnten nicht geladen werden (${res.status}): ${detail || res.statusText}`);
+  }
+  const data = await res.json();
+  const models = (data.models || [])
+    .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+    .map((m) => ({
+      id: (m.name || '').replace(/^models\//, ''),
+      displayName: m.displayName || (m.name || '').replace(/^models\//, '')
+    }))
+    .filter((m) => /^gemini-/i.test(m.id) && !/(embedding|tts|imagen|veo|robotics|computer-use|deep-research|audio-only)/i.test(m.id));
+
+  // Bevorzugte Flash-Modelle nach oben sortieren
+  models.sort((a, b) => {
+    const score = (id) => {
+      let s = 0;
+      if (/flash-latest/i.test(id)) s += 50;
+      if (/flash/i.test(id)) s += 30;
+      if (/lite/i.test(id)) s += 10;
+      if (/preview|exp/i.test(id)) s -= 5;
+      if (/2\.0/i.test(id)) s -= 20;
+      return s;
+    };
+    return score(b.id) - score(a.id) || b.id.localeCompare(a.id);
+  });
+
+  return models;
+}
+
 export async function testGeminiConnection(apiKey, model) {
   const reply = await callGemini({
     apiKey,
@@ -68,6 +120,29 @@ export async function testGeminiConnection(apiKey, model) {
     parts: [{ text: 'Antworte nur mit: OK' }]
   });
   return reply.slice(0, 40);
+}
+
+/**
+ * Testet das gewählte Modell; falls es für neue Nutzer gesperrt/veraltet ist,
+ * lädt automatisch alle verfügbaren Modelle des API-Keys und probiert das beste Flash-Modell.
+ */
+export async function testOrAutoSelectModel(apiKey, preferredModel) {
+  try {
+    const reply = await testGeminiConnection(apiKey, preferredModel);
+    return { model: preferredModel, reply, autoSwitched: false, models: null };
+  } catch (firstErr) {
+    const models = await listAvailableModels(apiKey);
+    const candidates = models.map((m) => m.id).filter((id) => id !== preferredModel).slice(0, 6);
+    for (const candidate of candidates) {
+      try {
+        const reply = await testGeminiConnection(apiKey, candidate);
+        return { model: candidate, reply, autoSwitched: true, models };
+      } catch {
+        // nächstes Modell versuchen
+      }
+    }
+    throw firstErr;
+  }
 }
 
 /**
@@ -105,14 +180,14 @@ export function compressImageFile(file, maxDim = 1600) {
 /**
  * Liest Produktname, Kategorie und vollständige INCI-Liste aus einem Foto per Gemini Vision.
  */
-export async function extractFromPhoto({ apiKey, model, base64Data, mimeType, activeProfile }) {
-  const profile = PROFILES[activeProfile] || PROFILES.alex;
+export async function extractFromPhoto({ apiKey, model, base64Data, mimeType, skinProfile }) {
+  const { label, details } = describeSkinProfile(skinProfile);
   const prompt = `Du bist ein präziser Dermokosmetik-INCI-Scanner.
 Analysiere dieses Produktfoto und extrahiere EXAKT:
 1. "productName": Markenname + Produktname (falls auf dem Foto sichtbar, sonst bestmögliche Bezeichnung).
 2. "category": genau einer dieser Werte: "cleanser", "serum", "moisturizer", "sunscreen", "body_lotion", "ointment", "shower_oil", "exfoliant", "shampoo", "conditioner", "lip_balm", "auto".
 3. "rawInci": die vollständige, kommagetrennte INCI-Liste in exakt der Reihenfolge wie auf der Packung (korrigiere offensichtliche Zeilenumbrüche/Trennstriche, aber erfinde keine Stoffe hinzu). Falls keine INCI-Liste auf dem Bild lesbar ist, gib "" zurück.
-4. "aiSummary": kurze, konkrete Einschätzung (3–5 Sätze auf Deutsch) speziell für das Profil "${profile.title}" (${profile.summary}).
+4. "aiSummary": kurze, konkrete Einschätzung (3–5 Sätze auf Deutsch) speziell für das Hautprofil "${label}" (${details}).
 
 Antworte ausschließlich als JSON-Objekt mit den Schlüsseln: productName, category, rawInci, aiSummary.`;
 
@@ -138,7 +213,7 @@ Antworte ausschließlich als JSON-Objekt mit den Schlüsseln: productName, categ
  * 1) Zuerst über den lokalen Python-Proxy (/api/fetch-url)
  * 2) Falls unvollständig oder offline vom Proxy: Fallback über Gemini mit Google Search Grounding
  */
-export async function extractFromUrl({ url, apiKey, model, activeProfile }) {
+export async function extractFromUrl({ url, apiKey, model, skinProfile }) {
   const trimmedUrl = (url || '').trim();
   if (!/^https?:\/\//i.test(trimmedUrl)) {
     throw new Error('Bitte gib eine gültige Produkt-URL ein (beginnend mit https://).');
@@ -163,7 +238,7 @@ export async function extractFromUrl({ url, apiKey, model, activeProfile }) {
           model,
           productName: proxyResult.productName,
           rawInci: proxyResult.rawInci,
-          activeProfile
+          skinProfile
         });
       } catch {
         // Deterministische Analyse reicht als Fallback
@@ -178,9 +253,8 @@ export async function extractFromUrl({ url, apiKey, model, activeProfile }) {
     };
   }
 
-  // Falls Proxy HTML-Text geliefert hat, aber keinen direkten INCI-Block fand -> Gemini extrahieren lassen
   if (apiKey && apiKey.trim()) {
-    const profile = PROFILES[activeProfile] || PROFILES.alex;
+    const { label, details } = describeSkinProfile(skinProfile);
     const contextSnippet = proxyResult?.snippet
       ? `\n\nAuszug der Webseite:\n${proxyResult.snippet.slice(0, 6000)}`
       : '';
@@ -193,7 +267,7 @@ Gib die Antwort ausschließlich als JSON-Objekt zurück (ohne Markdown-Codeblock
   "productName": "Marke + Produktname",
   "category": "cleanser|serum|moisturizer|sunscreen|body_lotion|ointment|shower_oil|exfoliant|shampoo|conditioner|lip_balm|auto",
   "rawInci": "Aqua, Glycerin, ...",
-  "aiSummary": "Kurze Einschätzung (3-4 Sätze auf Deutsch) für das Profil: ${profile.title}"
+  "aiSummary": "Kurze Einschätzung (3-4 Sätze auf Deutsch) für das Hautprofil: ${label} (${details})"
 }`;
 
     const text = await callGemini({
@@ -219,22 +293,26 @@ Gib die Antwort ausschließlich als JSON-Objekt zurück (ohne Markdown-Codeblock
 /**
  * Kurze, personalisierte KI-Zweitmeinung für ein bereits analysiertes Produkt.
  */
-export async function getAiSecondOpinion({ apiKey, model, productName, rawInci, activeProfile }) {
+export async function getAiSecondOpinion({ apiKey, model, productName, rawInci, skinProfile }) {
   if (!apiKey || !apiKey.trim()) return '';
-  const profile = PROFILES[activeProfile] || PROFILES.alex;
-  const inventoryText = profile.inventory.map((i) => `- ${i.name} (${i.slot})`).join('\n');
+  const { label, details, condIds } = describeSkinProfile(skinProfile);
+
+  let inventorySection = '';
+  if (condIds.includes('psoriasis')) {
+    inventorySection = `\nVorhandener Psoriasis-Bestand:\n${PROFILES.alex.inventory.map((i) => `- ${i.name} (${i.slot})`).join('\n')}`;
+  } else if (condIds.includes('seborrhoe') || skinProfile?.skinType === 'oily') {
+    inventorySection = `\nRelevante dm-Routine:\n${PROFILES.partner.inventory.map((i) => `- ${i.name} (${i.slot})`).join('\n')}`;
+  }
 
   const prompt = `Du bist ein evidenzbasierter Dermokosmetik-Berater.
-Aktives Profil: ${profile.title}
-Kurzprofil: ${profile.summary}
-Vorhandener Bestand:
-${inventoryText}
+Gewähltes Hautprofil: ${label}
+Details: ${details}${inventorySection}
 
 Analysiertes Produkt: ${productName || 'Unbekannt'}
 INCI-Liste: ${rawInci}
 
 Gib eine prägnante, praxisnahe Einschätzung in maximal 5 kurzen Sätzen auf Deutsch:
-1) Passt es zum aktiven Profil (und falls nein, zu welchem Hauttyp eher)?
+1) Passt es zum gewählten Hautprofil (und falls nein, zu welchem Hauttyp eher)?
 2) Wo genau im Pflegeplan einsetzen – oder ist es durch den Bestand bereits abgedeckt?
 3) Gibt es eine wichtige Anwendungsregel (z. B. Kein-Brennen-Regel, Soak & Seal, CWC, LSF)?`;
 

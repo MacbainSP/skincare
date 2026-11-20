@@ -21,10 +21,10 @@
         <div class="brand-mark" aria-hidden="true">SC</div>
         <div>
           <h1 class="app-title">SkinCheck</h1>
-          <p class="app-subtitle" id="header-profile-label">Profil: Alex (Psoriasis + Normal)</p>
+          <p class="app-subtitle" id="header-profile-label">Normal + Psoriasis</p>
         </div>
       </div>
-      <button class="profile-chip" id="quick-profile-switch" type="button" title="Profil wechseln">
+      <button class="profile-chip" id="quick-profile-switch" type="button" title="Schnellwechsel Alex / Freundin">
         <span id="profile-chip-text">Alex</span>
         <span class="chip-swap" aria-hidden="true">⇄</span>
       </button>
@@ -34,6 +34,27 @@
     <main class="app-main">
       <!-- VIEW 1: SCAN -->
       <section id="view-scan" class="view active" aria-label="Produkt scannen">
+        <!-- Flexible Skin Profile Selector -->
+        <div class="card profile-selector-card">
+          <div class="profile-selector-head">
+            <h2 style="margin:0;">🧬 Hautprofil wählen</h2>
+            <div class="preset-pills">
+              <button class="preset-btn" data-preset="alex" type="button">Alex</button>
+              <button class="preset-btn" data-preset="partner" type="button">Freundin</button>
+            </div>
+          </div>
+
+          <div class="field-group" style="margin-top:10px; margin-bottom:10px;">
+            <label class="field-label" for="select-skin-type">Grund-Hauttyp</label>
+            <select id="select-skin-type" class="text-input"></select>
+          </div>
+
+          <div class="field-group" style="margin-bottom:0;">
+            <span class="field-label">Besonderheiten / Hautzustände (optional, mehrfach wählbar)</span>
+            <div id="conditions-checkbox-grid" class="condition-grid"></div>
+          </div>
+        </div>
+
         <div class="card hero-card">
           <div class="input-mode-tabs" role="tablist">
             <button class="mode-tab active" data-mode="photo" role="tab" aria-selected="true">📷 Foto</button>
@@ -154,26 +175,6 @@
       <!-- VIEW 4: EINSTELLUNGEN -->
       <section id="view-settings" class="view" aria-label="Einstellungen">
         <div class="card">
-          <h2>Aktives Standard-Profil</h2>
-          <div class="field-group">
-            <label class="radio-card">
-              <input type="radio" name="default-profile" value="alex" checked />
-              <div>
-                <strong>Alex – Normaler Hauttyp + Psoriasis vulgaris</strong>
-                <p class="hint-small">Zonen-Management, 14 Bestandsprodukte (ISANA / Mixa / Balea med), strikt parfümfrei.</p>
-              </div>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="default-profile" value="partner" />
-              <div>
-                <strong>Freundin – Fettige Haut (Seborrhoe) &amp; dunkle Locken</strong>
-                <p class="hint-small">Leichte, nicht-komedogene Pflege, Double Cleansing, BHA/Azelain &amp; CWC-Haarroutine (dm).</p>
-              </div>
-            </label>
-          </div>
-        </div>
-
-        <div class="card">
           <h2>Gemini KI-Anbindung (Foto-Scan &amp; Link-Analyse)</h2>
           <p class="helper-text">
             Dein API-Key wird ausschließlich lokal auf deinem Gerät (<code>localStorage</code>) gespeichert. Du bekommst ihn kostenlos in Google AI Studio.
@@ -185,14 +186,17 @@
           <div class="field-group">
             <label class="field-label" for="input-gemini-model">Gemini Modell</label>
             <select id="input-gemini-model" class="text-input">
-              <option value="gemini-2.5-flash">gemini-2.5-flash (Empfohlen – schnell &amp; präzise)</option>
-              <option value="gemini-2.0-flash">gemini-2.0-flash (Alternative)</option>
-              <option value="gemini-2.5-pro">gemini-2.5-pro (Maximale Tiefe)</option>
+              <option value="gemini-flash-latest">gemini-flash-latest (Empfohlen – immer aktuelles Flash)</option>
+              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Schnell &amp; Free-Tier)</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Neu &amp; leicht)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash (Neuestes Flash)</option>
+              <option value="gemini-2.5-flash">gemini-2.5-flash</option>
             </select>
           </div>
           <div class="button-row">
             <button id="btn-save-settings" class="btn btn-primary" type="button">💾 Speichern</button>
-            <button id="btn-test-api" class="btn btn-secondary" type="button">🔌 Verbindung testen</button>
+            <button id="btn-test-api" class="btn btn-secondary" type="button">🔌 Testen / Auto-Wahl</button>
+            <button id="btn-load-models" class="btn btn-ghost" type="button">🔄 Modelle laden</button>
           </div>
           <p id="settings-feedback" class="hint-small"></p>
         </div>

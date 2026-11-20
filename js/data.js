@@ -2,6 +2,37 @@
 // SkinCheck Domain Data – basiert 1:1 auf deinen Psoriasis- & DM-Routinen
 // ============================================================================
 
+export const SKIN_TYPES = [
+  { id: 'normal', label: 'Normale Haut', short: 'Normal', desc: 'Ausgeglichene Talg- & Feuchtigkeitsbalance.' },
+  { id: 'dry', label: 'Trockene Haut', short: 'Trocken', desc: 'Lipid- & feuchtigkeitsarm, neigt zu Spannen/Schuppung.' },
+  { id: 'oily', label: 'Fettige Haut', short: 'Fettig', desc: 'Erhöhte Talgproduktion, Glanz, erweiterte Poren.' },
+  { id: 'combination', label: 'Mischhaut', short: 'Mischhaut', desc: 'Fettige T-Zone, normale bis trockene Wangen.' },
+  { id: 'sensitive', label: 'Empfindliche Haut', short: 'Empfindlich', desc: 'Reagiert schnell mit Rötung, Brennen oder Juckreiz.' }
+];
+
+export const SKIN_CONDITIONS = [
+  { id: 'psoriasis', label: 'Psoriasis vulgaris', short: 'Psoriasis', desc: 'Schuppenflechte – Koebner-Schutz, 0 % Parfum, Zonen-Management.' },
+  { id: 'seborrhoe', label: 'Seborrhoe / Seb. Ekzem', short: 'Seborrhoe', desc: 'Überaktive Talgdrüsen / Malassezia-sensibel – leichte Texturen.' },
+  { id: 'neurodermitis', label: 'Neurodermitis / Atopisch', short: 'Neurodermitis', desc: 'Gestörte Barriere – Ceramide, Lipide, strikt reiz- & duftfrei.' },
+  { id: 'rosacea', label: 'Rosazea / Couperose', short: 'Rosazea', desc: 'Gefäß- & Rötungsneigung – kein Alkohol, kein Menthol, LSF 50.' },
+  { id: 'acne', label: 'Akne / Unreine Haut', short: 'Akne/Unrein', desc: 'Komedogen-sensibel – BHA, Azelain, Niacinamid, keine schweren Fette.' },
+  { id: 'pih', label: 'Pigmentflecken / Pickelmale', short: 'PIH/Flecken', desc: 'Neigung zu dunklen Flecken – konsequenter LSF 50, Niacinamid/Azelain.' },
+  { id: 'curly_oily', label: 'Locken (fettiger Ansatz / trockene Spitzen)', short: 'Locken CWC', desc: 'Zonen-Haarpflege nach der CWC-Methode.' }
+];
+
+export const PROFILE_PRESETS = {
+  alex: { label: 'Alex', skinType: 'normal', conditions: ['psoriasis'] },
+  partner: { label: 'Freundin', skinType: 'oily', conditions: ['seborrhoe', 'pih', 'curly_oily'] }
+};
+
+export function formatSkinProfileLabel(skinProfile) {
+  const st = SKIN_TYPES.find((s) => s.id === skinProfile?.skinType) || SKIN_TYPES[0];
+  const conds = (skinProfile?.conditions || [])
+    .map((id) => SKIN_CONDITIONS.find((c) => c.id === id)?.short)
+    .filter(Boolean);
+  return conds.length ? `${st.short} + ${conds.join(', ')}` : st.label;
+}
+
 export const PROFILES = {
   alex: {
     id: 'alex',

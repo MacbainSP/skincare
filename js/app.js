@@ -1,11 +1,19 @@
-import { PROFILES, SAMPLE_PRODUCTS } from './data.js';
+import {
+  PROFILES,
+  PROFILE_PRESETS,
+  SAMPLE_PRODUCTS,
+  SKIN_CONDITIONS,
+  SKIN_TYPES,
+  formatSkinProfileLabel
+} from './data.js';
 import { analyzeInci } from './analyzer.js';
 import {
   compressImageFile,
   extractFromPhoto,
   extractFromUrl,
   getAiSecondOpinion,
-  testGeminiConnection
+  listAvailableModels,
+  testOrAutoSelectModel
 } from './gemini.js';
 
 const STORAGE_KEYS = {
@@ -26,13 +34,27 @@ function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.settings);
     const parsed = raw ? JSON.parse(raw) : {};
+    // Migration von altem activeProfile auf flexibles skinProfile
+    const defaultSkinProfile = parsed.activeProfile === 'partner'
+      ? { skinType: 'oily', conditions: ['seborrhoe', 'pih', 'curly_oily'] }
+      : { skinType: 'normal', conditions: ['psoriasis'] };
+    const skinProfile = parsed.skinProfile && parsed.skinProfile.skinType
+      ? {
+          skinType: parsed.skinProfile.skinType,
+          conditions: Array.isArray(parsed.skinProfile.conditions) ? parsed.skinProfile.conditions : []
+        }
+      : defaultSkinProfile;
     return {
-      activeProfile: parsed.activeProfile === 'partner' ? 'partner' : 'alex',
+      skinProfile,
       apiKey: parsed.apiKey || '',
-      model: parsed.model || 'gemini-2.5-flash'
+      model: parsed.model || 'gemini-flash-latest'
     };
   } catch {
-    return { activeProfile: 'alex', apiKey: '', model: 'gemini-2.5-flash' };
+    return {
+      skinProfile: { skinType: 'normal', conditions: ['psoriasis'] },
+      apiKey: '',
+      model: 'gemini-flash-latest'
+    };
   }
 }
 
@@ -68,6 +90,7 @@ function escapeHtml(str = '') {
 document.addEventListener('DOMContentLoaded', () => {
   registerServiceWorker();
   setupInstallPrompt();
+  initSkinProfileSelector();
   bindNavigation();
   bindModeTabs();
   bindScanControls();
@@ -75,9 +98,79 @@ document.addEventListener('DOMContentLoaded', () => {
   bindHistoryControls();
   bindSettingsControls();
   syncProfileUI();
-  renderPlan(state.settings.activeProfile);
+  renderPlan(getMatchingPlanId());
   renderHistory();
 });
+
+function getMatchingPlanId() {
+  const sp = state.settings.skinProfile;
+  if (sp.skinType === 'oily' || sp.conditions.includes('seborrhoe') || sp.conditions.includes('curly_oily')) {
+    return sp.conditions.includes('psoriasis') ? 'alex' : 'partner';
+  }
+  return 'alex';
+}
+
+function initSkinProfileSelector() {
+  const selectEl = document.getElementById('select-skin-type');
+  selectEl.innerHTML = SKIN_TYPES.map(
+    (st) => `<option value="${st.id}">${escapeHtml(st.label)} – ${escapeHtml(st.desc)}</option>`
+  ).join('');
+
+  const gridEl = document.getElementById('conditions-checkbox-grid');
+  gridEl.innerHTML = SKIN_CONDITIONS.map(
+    (c) => `
+      <label class="cond-chip" data-cond-id="${c.id}" title="${escapeHtml(c.desc)}">
+        <input type="checkbox" value="${c.id}" />
+        <span>${escapeHtml(c.short)}</span>
+      </label>`
+  ).join('');
+
+  selectEl.addEventListener('change', () => {
+    state.settings.skinProfile.skinType = selectEl.value;
+    onSkinProfileChanged();
+  });
+
+  gridEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const checked = Array.from(gridEl.querySelectorAll('input[type="checkbox"]:checked')).map((i) => i.value);
+      state.settings.skinProfile.conditions = checked;
+      onSkinProfileChanged();
+    });
+  });
+
+  document.querySelectorAll('.preset-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      applyPreset(btn.dataset.preset);
+    });
+  });
+}
+
+function applyPreset(presetId) {
+  const preset = PROFILE_PRESETS[presetId];
+  if (!preset) return;
+  state.settings.skinProfile = {
+    skinType: preset.skinType,
+    conditions: [...preset.conditions]
+  };
+  onSkinProfileChanged();
+}
+
+function onSkinProfileChanged() {
+  saveSettings();
+  syncProfileUI();
+  renderPlan(getMatchingPlanId());
+  if (state.lastAnalysis) {
+    const reanalyzed = analyzeInci({
+      productName: state.lastAnalysis.productName,
+      rawInci: state.lastAnalysis.rawInci,
+      category: state.lastAnalysis.category,
+      skinProfile: state.settings.skinProfile,
+      sourceUrl: state.lastAnalysis.sourceUrl
+    });
+    state.lastAnalysis = reanalyzed;
+    renderResult(reanalyzed, state.lastAiSummary);
+  }
+}
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
@@ -113,23 +206,18 @@ function bindNavigation() {
   });
 
   document.getElementById('quick-profile-switch').addEventListener('click', () => {
-    state.settings.activeProfile = state.settings.activeProfile === 'alex' ? 'partner' : 'alex';
-    saveSettings();
-    syncProfileUI();
-    renderPlan(state.settings.activeProfile);
-    if (state.lastAnalysis) {
-      // Sofort für das neue Profil neu bewerten!
-      const reanalyzed = analyzeInci({
-        productName: state.lastAnalysis.productName,
-        rawInci: state.lastAnalysis.rawInci,
-        category: state.lastAnalysis.category,
-        activeProfile: state.settings.activeProfile,
-        sourceUrl: state.lastAnalysis.sourceUrl
-      });
-      state.lastAnalysis = reanalyzed;
-      renderResult(reanalyzed, state.lastAiSummary);
-    }
+    const isAlex = matchesPreset('alex');
+    applyPreset(isAlex ? 'partner' : 'alex');
   });
+}
+
+function matchesPreset(presetId) {
+  const preset = PROFILE_PRESETS[presetId];
+  if (!preset) return false;
+  const sp = state.settings.skinProfile;
+  if (sp.skinType !== preset.skinType) return false;
+  if (sp.conditions.length !== preset.conditions.length) return false;
+  return preset.conditions.every((c) => sp.conditions.includes(c));
 }
 
 function switchView(viewName) {
@@ -142,16 +230,32 @@ function switchView(viewName) {
 }
 
 function syncProfileUI() {
-  const p = PROFILES[state.settings.activeProfile];
-  document.getElementById('header-profile-label').textContent = `Profil: ${p.title}`;
-  document.getElementById('profile-chip-text').textContent = p.shortName;
+  const sp = state.settings.skinProfile;
+  const label = formatSkinProfileLabel(sp);
+  document.getElementById('header-profile-label').textContent = label;
 
-  document.querySelectorAll('input[name="default-profile"]').forEach((r) => {
-    r.checked = r.value === state.settings.activeProfile;
+  const isAlex = matchesPreset('alex');
+  const isPartner = matchesPreset('partner');
+  document.getElementById('profile-chip-text').textContent = isAlex ? 'Alex' : isPartner ? 'Freundin' : 'Eigene';
+
+  // Dropdown & Checkboxes synchronisieren
+  const selectEl = document.getElementById('select-skin-type');
+  if (selectEl) selectEl.value = sp.skinType;
+
+  document.querySelectorAll('#conditions-checkbox-grid .cond-chip').forEach((chip) => {
+    const cb = chip.querySelector('input[type="checkbox"]');
+    const isChecked = sp.conditions.includes(chip.dataset.condId);
+    if (cb) cb.checked = isChecked;
+    chip.classList.toggle('checked', isChecked);
   });
 
+  document.querySelectorAll('.preset-btn').forEach((btn) => {
+    btn.classList.toggle('active', matchesPreset(btn.dataset.preset));
+  });
+
+  const planId = getMatchingPlanId();
   document.querySelectorAll('.segment-btn').forEach((b) => {
-    b.classList.toggle('active', b.dataset.planProfile === state.settings.activeProfile);
+    b.classList.toggle('active', b.dataset.planProfile === planId);
   });
 
   const apiHint = document.getElementById('photo-api-hint');
@@ -221,7 +325,7 @@ function bindScanControls() {
         model: state.settings.model,
         base64Data: state.currentPhoto.base64Data,
         mimeType: state.currentPhoto.mimeType,
-        activeProfile: state.settings.activeProfile
+        skinProfile: state.settings.skinProfile
       });
       runAnalysisAndRender({
         productName: extracted.productName,
@@ -249,7 +353,7 @@ function bindScanControls() {
         url,
         apiKey: state.settings.apiKey,
         model: state.settings.model,
-        activeProfile: state.settings.activeProfile
+        skinProfile: state.settings.skinProfile
       });
       runAnalysisAndRender({
         productName: extracted.productName,
@@ -283,7 +387,7 @@ function bindScanControls() {
           model: state.settings.model,
           productName: result.productName,
           rawInci: result.rawInci,
-          activeProfile: state.settings.activeProfile
+          skinProfile: state.settings.skinProfile
         }).catch(() => '');
         if (aiText) {
           state.lastAiSummary = aiText;
@@ -320,7 +424,7 @@ function runAnalysisAndRender({ productName, rawInci, category = 'auto', sourceU
     productName,
     rawInci,
     category,
-    activeProfile: state.settings.activeProfile,
+    skinProfile: state.settings.skinProfile,
     sourceUrl
   });
   state.lastAnalysis = analysis;
@@ -336,7 +440,7 @@ function runAnalysisAndRender({ productName, rawInci, category = 'auto', sourceU
     score: analysis.score,
     verdictLabel: analysis.verdict.label,
     verdictCls: analysis.verdict.cls,
-    activeProfile: analysis.activeProfile,
+    profileLabel: analysis.profileLabel,
     aiSummary,
     timestamp: analysis.timestamp
   });
@@ -376,24 +480,20 @@ function renderResult(a, aiSummary = '') {
   const container = document.getElementById('result-container');
   container.classList.remove('hidden');
 
-  const profileLabel = PROFILES[a.activeProfile].shortName;
-  const warningsHtml = a.activeProfile === 'alex'
-    ? (a.alexWarnings.length
-        ? `<div class="verdict-box badge-bad"><strong>⚠️ Wichtige Hinweise für dein Psoriasis-Profil</strong><ul class="bullet-list">${a.alexWarnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul></div>`
-        : `<div class="verdict-box badge-ok"><strong>✅ Keine Psoriasis-Red-Flags erkannt</strong>Frei von Duftstoffen, problematischen Alkoholen weit vorne, ätherischen Ölen und mechanischen Reibekörpern.</div>`)
-    : (a.partnerNotes.length
-        ? `<div class="verdict-box ${a.partnerScore >= 75 ? 'badge-ok' : 'badge-warn'}"><strong>Hinweise für fettige Haut / Locken</strong><ul class="bullet-list">${a.partnerNotes.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul></div>`
-        : '');
+  const profileLabel = a.profileLabel || formatSkinProfileLabel(state.settings.skinProfile);
+  const warningsHtml = a.warnings.length
+    ? `<div class="verdict-box ${a.score < 58 ? 'badge-bad' : 'badge-warn'}"><strong>⚠️ Wichtige Hinweise für dein Hautprofil (${escapeHtml(profileLabel)})</strong><ul class="bullet-list">${a.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul></div>`
+    : `<div class="verdict-box badge-ok"><strong>✅ Keine Red Flags für dein Profil erkannt</strong>Reizfreie, gut abgestimmte Formulierung für ${escapeHtml(profileLabel)}.</div>`;
 
-  const reasonsHtml = a.activeProfile === 'alex' && a.alexReasons.length
-    ? `<div class="verdict-box badge-info"><strong>✨ Pluspunkte</strong><ul class="bullet-list">${a.alexReasons.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>`
+  const reasonsHtml = a.reasons.length
+    ? `<div class="verdict-box badge-info"><strong>✨ Pluspunkte</strong><ul class="bullet-list">${a.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>`
     : '';
 
   const skinTypesHtml = a.skinTypes
     .map((st) => `
-      <div class="skintype-row ${st.id === a.activeProfile ? 'active-profile' : ''}">
+      <div class="skintype-row ${st.id === a.skinProfile?.skinType ? 'active-profile' : ''}">
         <div>
-          <div class="skintype-name">${escapeHtml(st.name)} ${st.id === a.activeProfile ? '<span class="pill badge-info">Aktiv</span>' : ''}</div>
+          <div class="skintype-name">${escapeHtml(st.name)} ${st.id === a.skinProfile?.skinType ? '<span class="pill badge-info">Dein Grundtyp</span>' : ''}</div>
           <div class="skintype-note">${escapeHtml(st.note)}</div>
         </div>
         <span class="pill ${st.verdict.cls}">${st.score}/100</span>
@@ -592,11 +692,12 @@ function renderHistory() {
   container.innerHTML = state.history
     .map((h) => {
       const dt = new Date(h.timestamp).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const label = h.profileLabel || PROFILES[h.activeProfile]?.shortName || 'Normal';
       return `
         <div class="card history-card" data-history-id="${escapeHtml(h.id)}">
           <div style="min-width:0;">
             <strong style="display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(h.productName)}</strong>
-            <div class="hint-small">${dt} · Profil: ${escapeHtml(PROFILES[h.activeProfile]?.shortName || 'Alex')}</div>
+            <div class="hint-small">${dt} · ${escapeHtml(label)}</div>
           </div>
           <span class="pill ${escapeHtml(h.verdictCls)}">${h.score}/100</span>
         </div>`;
@@ -611,7 +712,7 @@ function renderHistory() {
         productName: entry.productName,
         rawInci: entry.rawInci,
         category: entry.category || 'auto',
-        activeProfile: state.settings.activeProfile,
+        skinProfile: state.settings.skinProfile,
         sourceUrl: entry.sourceUrl || ''
       });
       state.lastAnalysis = reanalyzed;
@@ -625,48 +726,84 @@ function renderHistory() {
 // ============================================================================
 // SETTINGS VIEW
 // ============================================================================
+function populateModelDropdown(selectEl, models, selectedId) {
+  if (!models || !models.length) return;
+  selectEl.innerHTML = models
+    .map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.id)}${m.displayName && m.displayName !== m.id ? ` (${escapeHtml(m.displayName)})` : ''}</option>`)
+    .join('');
+  if (selectedId && models.some((m) => m.id === selectedId)) {
+    selectEl.value = selectedId;
+  }
+}
+
 function bindSettingsControls() {
   const apiKeyInput = document.getElementById('input-api-key');
   const modelSelect = document.getElementById('input-gemini-model');
   const feedback = document.getElementById('settings-feedback');
 
   apiKeyInput.value = state.settings.apiKey;
+  if (state.settings.model && !Array.from(modelSelect.options).some((o) => o.value === state.settings.model)) {
+    const opt = document.createElement('option');
+    opt.value = state.settings.model;
+    opt.textContent = state.settings.model;
+    modelSelect.prepend(opt);
+  }
   modelSelect.value = state.settings.model;
-
-  document.querySelectorAll('input[name="default-profile"]').forEach((radio) => {
-    radio.addEventListener('change', () => {
-      if (radio.checked) {
-        state.settings.activeProfile = radio.value;
-        saveSettings();
-        syncProfileUI();
-        renderPlan(state.settings.activeProfile);
-      }
-    });
-  });
 
   document.getElementById('btn-save-settings').addEventListener('click', () => {
     state.settings.apiKey = apiKeyInput.value.trim();
     state.settings.model = modelSelect.value;
     saveSettings();
     syncProfileUI();
-    feedback.textContent = '✅ Einstellungen lokal gespeichert.';
+    feedback.textContent = `✅ Einstellungen lokal gespeichert (Modell: ${state.settings.model}).`;
+  });
+
+  document.getElementById('btn-load-models').addEventListener('click', async () => {
+    const key = apiKeyInput.value.trim();
+    if (!key) {
+      feedback.textContent = '⚠️ Bitte zuerst deinen Gemini API-Key eintragen.';
+      return;
+    }
+    feedback.textContent = 'Lade verfügbare Modelle für deinen API-Key…';
+    try {
+      const models = await listAvailableModels(key);
+      if (!models.length) {
+        feedback.textContent = '⚠️ Keine generateContent-Modelle für diesen Key gefunden.';
+        return;
+      }
+      populateModelDropdown(modelSelect, models, modelSelect.value);
+      state.settings.apiKey = key;
+      state.settings.model = modelSelect.value;
+      saveSettings();
+      syncProfileUI();
+      feedback.textContent = `✅ ${models.length} verfügbare Modelle geladen! Gewählt: ${state.settings.model}`;
+    } catch (err) {
+      feedback.textContent = `❌ ${err.message}`;
+    }
   });
 
   document.getElementById('btn-test-api').addEventListener('click', async () => {
     const key = apiKeyInput.value.trim();
-    const model = modelSelect.value;
+    const preferredModel = modelSelect.value;
     if (!key) {
       feedback.textContent = '⚠️ Bitte zuerst einen Gemini API-Key eintragen.';
       return;
     }
-    feedback.textContent = 'Teste Verbindung zu Gemini…';
+    feedback.textContent = 'Teste Verbindung (und suche automatisch ein freies Modell falls nötig)…';
     try {
-      const reply = await testGeminiConnection(key, model);
+      const res = await testOrAutoSelectModel(key, preferredModel);
+      if (res.models && res.models.length) {
+        populateModelDropdown(modelSelect, res.models, res.model);
+      } else {
+        modelSelect.value = res.model;
+      }
       state.settings.apiKey = key;
-      state.settings.model = model;
+      state.settings.model = res.model;
       saveSettings();
       syncProfileUI();
-      feedback.textContent = `✅ Verbindung erfolgreich! Antwort: „${reply}“`;
+      feedback.textContent = res.autoSwitched
+        ? `✅ Automatisch auf verfügbares Modell „${res.model}“ gewechselt & gespeichert! Antwort: „${res.reply}“`
+        : `✅ Verbindung erfolgreich mit „${res.model}“! Antwort: „${res.reply}“`;
     } catch (err) {
       feedback.textContent = `❌ ${err.message}`;
     }

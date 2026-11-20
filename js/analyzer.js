@@ -1,4 +1,4 @@
-import { INCI_DB, ONE_PERCENT_ANCHORS } from './data.js';
+import { INCI_DB, ONE_PERCENT_ANCHORS, formatSkinProfileLabel } from './data.js';
 
 /**
  * Zerlegt einen rohen INCI-Text in eine saubere Liste einzelner Inhaltsstoffe.
@@ -126,11 +126,22 @@ export const CATEGORY_LABELS = {
 /**
  * Führt die komplette deterministische INCI-Analyse durch.
  */
-export function analyzeInci({ productName = '', rawInci = '', category = 'auto', activeProfile = 'alex', sourceUrl = '' }) {
+export function analyzeInci({
+  productName = '',
+  rawInci = '',
+  category = 'auto',
+  skinProfile = { skinType: 'normal', conditions: ['psoriasis'] },
+  sourceUrl = ''
+}) {
   const items = parseInciList(rawInci);
   if (items.length === 0) {
     throw new Error('Keine gültige INCI-Liste erkannt. Bitte kommagetrennte Inhaltsstoffe eingeben.');
   }
+
+  const skinType = skinProfile?.skinType || 'normal';
+  const conditions = Array.isArray(skinProfile?.conditions) ? skinProfile.conditions : [];
+  const hasCond = (c) => conditions.includes(c);
+  const profileLabel = formatSkinProfileLabel({ skinType, conditions });
 
   const detectedCategory = detectCategory(productName, items, category);
   const isWaterBased = /^aqua\b|^water\b/i.test(items[0]);
@@ -174,11 +185,10 @@ export function analyzeInci({ productName = '', rawInci = '', category = 'auto',
       desc = rule.desc;
       status = rule.severity;
 
-      // Positionsabhängige Sonderlogik
       if (rule.category === 'bad_alcohol') {
         if (pos <= 6 && !belowAnchor) {
           status = 'bad';
-          desc = `Steht weit vorne (Platz ${pos}, ${est}) – trocknet aus & brennt auf Psoriasis-Plaques!`;
+          desc = `Steht weit vorne (Platz ${pos}, ${est}) – trocknet aus & reizt die Hautbarriere!`;
           flags.badAlcoholHigh.push(raw);
         } else {
           status = 'neutral';
@@ -218,7 +228,6 @@ export function analyzeInci({ productName = '', rawInci = '', category = 'auto',
         flags.mildSurfactant.push(raw);
       }
 
-      // Blender-Check (Urea / Panthenol / Glycerin weit hinter 1-%-Anker)
       if (rule.needsHighPos && belowAnchor) {
         status = 'warn';
         desc += ' ⚠️ Steht erst hinter der 1-%-Linie – wahrscheinlich zu niedrig dosiert (Blender-Gefahr)!';
@@ -250,171 +259,155 @@ export function analyzeInci({ productName = '', rawInci = '', category = 'auto',
     }
   }
 
-  // --- BEWERTUNG FÜR ALEX (Normaler Hauttyp + Psoriasis vulgaris) ---
-  let alexScore = 88;
-  const alexReasons = [];
-  const alexWarnings = [];
+  // --- DYNAMISCHE BEWERTUNG FÜR DAS AKTIVE HAUTPROFIL ---
+  const isStrictSensitive =
+    skinType === 'sensitive' || hasCond('psoriasis') || hasCond('neurodermitis') || hasCond('rosacea');
+  const isOilyProne =
+    skinType === 'oily' || skinType === 'combination' || hasCond('seborrhoe') || hasCond('acne');
+  const isDryProne =
+    skinType === 'dry' || hasCond('neurodermitis');
 
+  let score = 86;
+  const reasons = [];
+  const warnings = [];
+
+  // 1. Duftstoffe
   if (flags.fragrance.length) {
-    alexScore -= 35;
-    alexWarnings.push(`Duftstoffe/Allergene erkannt (${flags.fragrance.slice(0, 3).join(', ')}) – Entzündungs- & Allergie-Trigger bei Psoriasis.`);
+    const pen = isStrictSensitive ? 35 : 14;
+    score -= pen;
+    warnings.push(
+      `Duftstoffe/Allergene (${flags.fragrance.slice(0, 3).join(', ')})` +
+        (isStrictSensitive ? ' – starker Reiz- & Allergie-Trigger für dein Profil.' : ' – unnötiges Reizpotenzial.')
+    );
   }
+
+  // 2. Alkohol weit vorne
   if (flags.badAlcoholHigh.length) {
-    alexScore -= 30;
-    alexWarnings.push(`Austrocknender Alkohol weit vorne (${flags.badAlcoholHigh.join(', ')}) – zerstört Lipide & brennt auf Plaques.`);
+    const pen = isStrictSensitive || isDryProne ? 30 : 20;
+    score -= pen;
+    warnings.push(
+      `Austrocknender Alkohol weit vorne (${flags.badAlcoholHigh.join(', ')}) – schwächt die Lipidbarriere` +
+        (isOilyProne ? ' und fördert „dehydrated oily skin“ / Nachfetten.' : ' & kann brennen.')
+    );
+  } else if (flags.badAlcoholLow.length) {
+    reasons.push('Alkohol steht erst unter der 1-%-Linie – i. d. R. unkritisch');
   }
+
+  // 3. Ätherische Öle / Menthol
   if (flags.essentialOil.length) {
-    alexScore -= 28;
-    alexWarnings.push(`Ätherische Öle / Reizstoffe (${flags.essentialOil.join(', ')}) – starkes Reizpotenzial.`);
-  }
-  if (flags.scrub.length) {
-    alexScore -= 40;
-    alexWarnings.push(`Mechanische Reibekörper (${flags.scrub.join(', ')}) – hohes Risiko für das Koebner-Phänomen (neue Plaques)!`);
-  }
-  if (flags.harshSurfactant.length) {
-    alexScore -= 30;
-    alexWarnings.push(`Aggressives Sulfat-Tensid (${flags.harshSurfactant.join(', ')}) – schädigt die Hautbarriere.`);
-  }
-  if (flags.sles.length && detectedCategory !== 'shampoo') {
-    alexScore -= 18;
-    alexWarnings.push(`SLES enthalten – für Psoriasis-Haut im Gesicht/Körper zu entfettend.`);
-  }
-  if (flags.badUv.length) {
-    alexScore -= 15;
-    alexWarnings.push(`Kritischer UV-Filter (${flags.badUv.join(', ')}) – erhöhtes Kontaktallergie-Risiko.`);
-  }
-  if (showerOilWarning) {
-    alexScore -= 25;
-    alexWarnings.push(showerOilWarning);
-  }
-  if (flags.blenderWarnings.length) {
-    alexScore -= 8;
-    alexWarnings.push(`Niedrig dosierte Kernwirkstoffe hinter der 1-%-Linie: ${flags.blenderWarnings.join(', ')}.`);
-  }
-
-  // Positiv-Punkte für Alex
-  if (flags.barrier.length) { alexScore += 6; alexReasons.push(`Barrierelipide/Ceramide (${flags.barrier.slice(0, 3).join(', ')})`); }
-  if (flags.soothing.length) { alexScore += 5; alexReasons.push(`Beruhigend & antientzündlich (${flags.soothing.slice(0, 3).join(', ')})`); }
-  if (flags.keratolytic.length) { alexScore += 4; alexReasons.push(`Sanfte Keratolyse (${flags.keratolytic.join(', ')})`); }
-  if (flags.humectant.length) { alexScore += 4; alexReasons.push(`Starke Feuchthalter (${flags.humectant.slice(0, 3).join(', ')})`); }
-  if (flags.goodUv.length >= 2) { alexScore += 6; alexReasons.push(`Moderne, photostabile UV-Filter (${flags.goodUv.length}x)`); }
-  if (flags.mildSurfactant.length) { alexScore += 5; alexReasons.push('Milde, barrierefreundliche Tenside'); }
-  if (flags.badAlcoholLow.length && !flags.badAlcoholHigh.length) {
-    alexReasons.push('Alkohol steht erst unter 1 % – für dich unkritisch');
-  }
-  if (flags.stingTriggers.length) {
-    alexWarnings.push(`Kein-Brennen-Regel: Enthält ${flags.stingTriggers.join(', ')} – strikt nur auf geschlossene Haut auftragen, nicht auf offene Risse!`);
-  }
-
-  alexScore = Math.max(5, Math.min(100, alexScore));
-
-  // --- BEWERTUNG FÜR FREUNDIN (Fettige Haut / Seborrhoe & Locken) ---
-  let partnerScore = 84;
-  const partnerNotes = [];
-  if (flags.heavyLipidHigh.length && ['moisturizer', 'sunscreen', 'serum'].includes(detectedCategory)) {
-    partnerScore -= 32;
-    partnerNotes.push(`Zu reichhaltig/okklusiv für fettige Gesichtshaut (${flags.heavyLipidHigh.slice(0, 2).join(', ')} weit vorne) – fördert Glanz & Porenstau.`);
-  }
-  if (flags.fragrance.length) { partnerScore -= 15; partnerNotes.push('Enthält Parfum/Duftstoffe (unnötiges Reizrisiko).'); }
-  if (flags.badAlcoholHigh.length) { partnerScore -= 20; partnerNotes.push('Viel austrocknender Alkohol – begünstigt „dehydrated oily skin“ & stärkeres Nachfetten.'); }
-  if (flags.harshSurfactant.length) { partnerScore -= 25; partnerNotes.push('Zu harte Sulfate – zerstören Barriere & triggern Nachfetten.'); }
-  if (flags.sles.length && detectedCategory === 'shampoo') {
-    partnerScore += 5;
-    partnerNotes.push('SLES im Shampoo: für fettigen Haaransatz geeignet, aber nur mit CWC-Spitzenschutz!');
-  }
-  if (flags.sebumActive.length || flags.keratolytic.some((k) => /salicylic/i.test(k))) {
-    partnerScore += 10;
-    partnerNotes.push('Top-Wirkstoffe gegen Sebum, Poren & Pickelmale (PIH)!');
-  }
-  if (flags.soothing.some((s) => /niacinamide/i.test(s))) {
-    partnerScore += 6;
-    partnerNotes.push('Niacinamid reguliert Talg & mildert Pickelmale.');
-  }
-  if (flags.lightLipid.length && !flags.heavyLipidHigh.length) {
-    partnerScore += 5;
-    partnerNotes.push('Leichte, nicht-komedogene Textur.');
-  }
-  partnerScore = Math.max(5, Math.min(100, partnerScore));
-
-  // --- WEITERE HAUTTYPEN ---
-  let dryScore = 78;
-  if (flags.heavyLipidHigh.length || flags.barrier.length || flags.humectant.length) dryScore += 14;
-  if (flags.badAlcoholHigh.length || flags.harshSurfactant.length) dryScore -= 35;
-  if (flags.fragrance.length) dryScore -= 12;
-  dryScore = Math.max(5, Math.min(100, dryScore));
-
-  let normalScore = 84;
-  if (flags.fragrance.length) normalScore -= 12;
-  if (flags.badAlcoholHigh.length || flags.harshSurfactant.length) normalScore -= 25;
-  if (flags.scrub.length) normalScore -= 15;
-  if (flags.humectant.length || flags.soothing.length) normalScore += 8;
-  normalScore = Math.max(5, Math.min(100, normalScore));
-
-  let sensitiveScore = alexScore; // ähnlich streng wie Psoriasis (0 % Parfum/Alkohol)
-
-  const skinTypes = [
-    {
-      id: 'alex',
-      name: 'Normal + Psoriasis vulgaris (Alex)',
-      score: alexScore,
-      verdict: scoreToVerdict(alexScore),
-      note: alexWarnings[0] || alexReasons[0] || 'Reizfreie, barrierefreundliche Formulierung.'
-    },
-    {
-      id: 'partner',
-      name: 'Fettige Haut / Seborrhoe (Freundin)',
-      score: partnerScore,
-      verdict: scoreToVerdict(partnerScore),
-      note: partnerNotes[0] || (flags.heavyLipidHigh.length ? 'Eher reichhaltig.' : 'Gut verträglich & leicht.')
-    },
-    {
-      id: 'dry',
-      name: 'Trockene / barrieregestörte Haut',
-      score: dryScore,
-      verdict: scoreToVerdict(dryScore),
-      note: flags.heavyLipidHigh.length || flags.barrier.length ? 'Schützend & rückfettend.' : 'Solide Feuchtigkeitsbasis.'
-    },
-    {
-      id: 'normal',
-      name: 'Normale Haut (ohne Psoriasis)',
-      score: normalScore,
-      verdict: scoreToVerdict(normalScore),
-      note: normalScore >= 75 ? 'Gut geeignet für die tägliche Pflege.' : 'Enthält unnötige Reizstoffe.'
-    },
-    {
-      id: 'sensitive',
-      name: 'Empfindliche / zu Rötungen neigende Haut',
-      score: sensitiveScore,
-      verdict: scoreToVerdict(sensitiveScore),
-      note: flags.fragrance.length || flags.essentialOil.length ? 'Wegen Duft-/Reizstoffen nicht ideal.' : 'Reizarm & hautberuhigend.'
+    const isCwcShampoo = detectedCategory === 'shampoo' && hasCond('curly_oily') && !isStrictSensitive;
+    if (isCwcShampoo) {
+      reasons.push('Menthol/erfrischende Extrakte im Ansatz-Shampoo (bei CWC-Technik OK für fettige Kopfhaut)');
+    } else {
+      score -= isStrictSensitive ? 28 : 14;
+      warnings.push(`Ätherische Öle / Reizstoffe (${flags.essentialOil.join(', ')}) – hohes Reiz- & Rötungspotenzial.`);
     }
-  ];
+  }
+
+  // 4. Mechanische Reibekörper
+  if (flags.scrub.length) {
+    score -= hasCond('psoriasis') || hasCond('rosacea') ? 40 : 18;
+    warnings.push(
+      `Mechanische Reibekörper (${flags.scrub.join(', ')})` +
+        (hasCond('psoriasis') ? ' – hohes Risiko für das Koebner-Phänomen (neue Plaques)!' : ' – können Mikroverletzungen & Rötungen fördern.')
+    );
+  }
+
+  // 5. Tenside
+  if (flags.harshSurfactant.length) {
+    score -= 30;
+    warnings.push(`Aggressives Sulfat-Tensid (${flags.harshSurfactant.join(', ')}) – zerstört Barrierelipide.`);
+  }
+  if (flags.sles.length) {
+    if (detectedCategory === 'shampoo' && (hasCond('curly_oily') || skinType === 'oily') && !hasCond('psoriasis')) {
+      score += 4;
+      reasons.push('SLES im Shampoo entfettet fettigen Ansatz gründlich (mit CWC-Spitzenschutz anwenden)');
+    } else if (isStrictSensitive || isDryProne || detectedCategory !== 'shampoo') {
+      score -= 18;
+      warnings.push('SLES enthalten – für Gesicht/empfindliche oder trockene Haut zu entfettend.');
+    }
+  }
+
+  // 6. Schwere Lipide bei fettiger Haut / Seborrhoe / Akne
+  if (flags.heavyLipidHigh.length && ['moisturizer', 'sunscreen', 'serum'].includes(detectedCategory)) {
+    if (isOilyProne) {
+      score -= skinType === 'combination' && !hasCond('acne') ? 18 : 30;
+      warnings.push(
+        `Sehr reichhaltig/okklusiv (${flags.heavyLipidHigh.slice(0, 2).join(', ')} weit vorne) – kann bei fettiger Haut, Seborrhoe oder Akne Glanz & Unreinheiten fördern.`
+      );
+    } else if (isDryProne || hasCond('psoriasis')) {
+      score += 6;
+      reasons.push(`Schützende Lipide (${flags.heavyLipidHigh.slice(0, 2).join(', ')}) – ideal für Barriere/Winter/Plaques`);
+    }
+  }
+
+  // 7. UV-Filter
+  if (flags.badUv.length) {
+    score -= isStrictSensitive ? 15 : 8;
+    warnings.push(`Älterer/kritischer UV-Filter (${flags.badUv.join(', ')}) – höheres Allergierisiko.`);
+  }
+  if (flags.goodUv.length >= 2) {
+    score += hasCond('pih') || hasCond('rosacea') || hasCond('psoriasis') ? 8 : 5;
+    reasons.push(`Moderne, photostabile UV-Filter (${flags.goodUv.length}x) – schützt vor UV-Schüben & Pigmentflecken`);
+  }
+
+  // 8. Keratolyse / Säuren / Urea
+  if (flags.keratolytic.length) {
+    if (hasCond('rosacea')) {
+      score -= 12;
+      warnings.push(`Enthält ${flags.keratolytic.join(', ')} – bei Rosazea sehr vorsichtig testen (Flush-/Reizgefahr).`);
+    } else {
+      score += hasCond('psoriasis') || hasCond('acne') || hasCond('seborrhoe') ? 6 : 4;
+      reasons.push(`Gezielte Keratolyse / Porenklärung (${flags.keratolytic.join(', ')})`);
+    }
+  }
+  if (flags.stingTriggers.length && (hasCond('psoriasis') || hasCond('neurodermitis'))) {
+    warnings.push(`Kein-Brennen-Regel: ${flags.stingTriggers.join(', ')} strikt nur auf geschlossene Haut auftragen, nicht auf offene Risse!`);
+  }
+
+  // 9. Weitere Pluspunkte
+  if (flags.barrier.length) { score += isDryProne || isStrictSensitive ? 8 : 5; reasons.push(`Barrierelipide/Ceramide (${flags.barrier.slice(0, 3).join(', ')})`); }
+  if (flags.soothing.length) { score += 5; reasons.push(`Beruhigend & antientzündlich (${flags.soothing.slice(0, 3).join(', ')})`); }
+  if (flags.humectant.length) { score += 4; reasons.push(`Feuchthalter / NMF (${flags.humectant.slice(0, 3).join(', ')})`); }
+  if (flags.mildSurfactant.length) { score += 5; reasons.push('Milde, barrierefreundliche Tenside'); }
+  if (flags.sebumActive.length && (isOilyProne || hasCond('rosacea') || hasCond('pih'))) {
+    score += 8;
+    reasons.push(`Talg-/Rötungs-/PIH-Wirkstoffe (${flags.sebumActive.slice(0, 3).join(', ')})`);
+  }
+  if (flags.lightLipid.length && !flags.heavyLipidHigh.length && (isOilyProne || skinType === 'normal')) {
+    score += 4;
+    reasons.push('Leichte, nicht-komedogene Lipidbasis');
+  }
+  if (showerOilWarning) { score -= 25; warnings.push(showerOilWarning); }
+  if (flags.blenderWarnings.length) { score -= 8; warnings.push(`Kernwirkstoff hinter 1-%-Linie (evtl. zu niedrig dosiert): ${flags.blenderWarnings.join(', ')}.`); }
+
+  score = Math.max(5, Math.min(100, score));
+
+  // --- ALLGEMEINE 5-HAUTTYPEN-MATRIX (für „Zu welchem Hauttyp passt es?“) ---
+  const skinTypes = buildSkinTypeMatrix(flags, detectedCategory, showerOilWarning);
 
   // --- PFLEGEPLAN-EINORDNUNG ---
   const routinePlacement = buildRoutinePlacement({
-    activeProfile,
+    skinType,
+    conditions,
     detectedCategory,
     flags,
-    alexScore,
-    partnerScore
+    score
   });
 
-  const activeScore = activeProfile === 'partner' ? partnerScore : alexScore;
-  const activeVerdict = scoreToVerdict(activeScore);
+  const verdict = scoreToVerdict(score);
 
   return {
     productName: productName.trim() || 'Unbenanntes Produkt',
     category: detectedCategory,
     categoryLabel: CATEGORY_LABELS[detectedCategory] || 'Hautpflege',
     sourceUrl,
-    activeProfile,
-    score: activeScore,
-    verdict: activeVerdict,
-    alexScore,
-    partnerScore,
-    alexReasons,
-    alexWarnings,
-    partnerNotes,
+    skinProfile: { skinType, conditions },
+    profileLabel,
+    score,
+    verdict,
+    reasons,
+    warnings,
     skinTypes,
     routinePlacement,
     anchorFound: anchorIndex >= 0,
@@ -427,142 +420,199 @@ export function analyzeInci({ productName = '', rawInci = '', category = 'auto',
   };
 }
 
+function buildSkinTypeMatrix(flags, detectedCategory, showerOilWarning) {
+  const clamp = (n) => Math.max(5, Math.min(100, n));
+
+  let normal = 85;
+  if (flags.fragrance.length) normal -= 12;
+  if (flags.badAlcoholHigh.length) normal -= 22;
+  if (flags.harshSurfactant.length) normal -= 25;
+  if (flags.humectant.length || flags.soothing.length) normal += 6;
+  normal = clamp(normal);
+
+  let dry = 80;
+  if (flags.heavyLipidHigh.length || flags.barrier.length || flags.humectant.length) dry += 14;
+  if (flags.badAlcoholHigh.length || flags.harshSurfactant.length || flags.sles.length) dry -= 30;
+  if (flags.fragrance.length) dry -= 12;
+  if (showerOilWarning) dry -= 20;
+  dry = clamp(dry);
+
+  let oily = 84;
+  if (flags.heavyLipidHigh.length && ['moisturizer', 'sunscreen', 'serum'].includes(detectedCategory)) oily -= 32;
+  if (flags.sebumActive.length || flags.keratolytic.some((k) => /salicylic/i.test(k))) oily += 10;
+  if (flags.badAlcoholHigh.length || flags.harshSurfactant.length) oily -= 22;
+  if (flags.fragrance.length) oily -= 12;
+  if (flags.lightLipid.length && !flags.heavyLipidHigh.length) oily += 5;
+  oily = clamp(oily);
+
+  let combo = Math.round((normal + oily) / 2);
+
+  let sensitive = 88;
+  if (flags.fragrance.length) sensitive -= 35;
+  if (flags.badAlcoholHigh.length) sensitive -= 30;
+  if (flags.essentialOil.length) sensitive -= 28;
+  if (flags.scrub.length) sensitive -= 38;
+  if (flags.harshSurfactant.length) sensitive -= 30;
+  if (flags.badUv.length) sensitive -= 15;
+  if (flags.barrier.length || flags.soothing.length) sensitive += 8;
+  sensitive = clamp(sensitive);
+
+  return [
+    { id: 'normal', name: 'Normale Haut', score: normal, verdict: scoreToVerdict(normal), note: normal >= 75 ? 'Gut geeignet für die tägliche Basispflege.' : 'Enthält unnötig austrocknende/reizende Stoffe.' },
+    { id: 'dry', name: 'Trockene Haut / Barriereschutz', score: dry, verdict: scoreToVerdict(dry), note: flags.heavyLipidHigh.length || flags.barrier.length ? 'Pflegend & lipidergänzend.' : 'Eher leicht – im Winter ggf. kombinieren.' },
+    { id: 'oily', name: 'Fettige Haut / Seborrhoe / Unrein', score: oily, verdict: scoreToVerdict(oily), note: flags.heavyLipidHigh.length ? 'Für fettige Gesichtshaut tagsüber oft zu schwer.' : 'Leicht & gut verträglich.' },
+    { id: 'combination', name: 'Mischhaut', score: combo, verdict: scoreToVerdict(combo), note: flags.heavyLipidHigh.length ? 'Eher für trockene Wangen als für die T-Zone.' : 'Ausgewogen für T-Zone & Wangen.' },
+    { id: 'sensitive', name: 'Empfindliche Haut / Psoriasis / Rosazea', score: sensitive, verdict: scoreToVerdict(sensitive), note: sensitive >= 75 ? 'Reizarm & barrierefreundlich.' : 'Wegen Duft-, Alkohol- oder Reizstoffen meiden.' }
+  ];
+}
+
 function scoreToVerdict(score) {
   if (score >= 80) return { label: 'Passt sehr gut', cls: 'badge-ok', emoji: '✅' };
   if (score >= 58) return { label: 'Bedingt geeignet', cls: 'badge-warn', emoji: '⚠️' };
-  return { label: 'Lieber im Regal lassen', cls: 'badge-bad', emoji: '🚫' };
+  return { label: 'Lieber meiden', cls: 'badge-bad', emoji: '🚫' };
 }
 
-function buildRoutinePlacement({ activeProfile, detectedCategory, flags, alexScore, partnerScore }) {
-  if (activeProfile === 'partner') {
-    if (partnerScore < 55) {
-      return {
-        slot: 'Nicht für die Gesichtsroutine empfohlen',
-        advice: 'Aufgrund der INCI-Zusammensetzung (z. B. zu reichhaltig/okklusiv oder reizend) nicht fürs Gesicht nutzen – falls schon vorhanden, höchstens abends an Hals/Dekolleté oder Körper aufbrauchen.',
-        existingMatch: 'Bleib bei deiner leichten dm-Routine (Balea MED Waschgel, Azelain Booster, 2% BHA, Aqua Creme-Gel, SUNDANCE 50+).'
-      };
-    }
-    const map = {
+function buildRoutinePlacement({ skinType, conditions, detectedCategory, flags, score }) {
+  const hasCond = (c) => conditions.includes(c);
+
+  if (score < 55) {
+    return {
+      slot: 'Nicht für dein gewähltes Hautprofil empfohlen',
+      advice: 'Aufgrund der erkannten Reizstoffe oder unpassenden Textur lieber im Regal lassen (falls schon gekauft, höchstens an unempfindlichen Körperstellen aufbrauchen).',
+      existingMatch: hasCond('psoriasis')
+        ? 'Dein 14-Produkte-Psoriasis-Bestand deckt bereits alle Pflegeschritte reizfrei ab.'
+        : 'Prüfe im Tab „Pflegeplan“ passende Alternativen.'
+    };
+  }
+
+  // Spezifischer Bestandsabgleich für Psoriasis (Alex)
+  if (hasCond('psoriasis')) {
+    const alexMap = {
       cleanser: {
-        slot: 'Gesicht Morgens & Abends (Schritt 1 / 2 im Double Cleansing)',
-        advice: 'Sanft 30 Sek. reinigen. Abends nach dem Balea Reinigungsöl als 2. Schritt anwenden.',
-        existingMatch: 'Im Bestand: Balea MED Ultra Sensitive Waschgel.'
+        slot: 'Gesicht AM/PM (Schritt 1) oder Körper-Dusche',
+        advice: 'Lauwarm reinigen, danach nur trocken tupfen (nicht rubbeln!) und innerhalb von 3 Minuten eincremen (Soak & Seal).',
+        existingMatch: 'Im Bestand: ISANA med Ultra Sensitiv Totes Meer Waschlotion (#4).'
       },
-      exfoliant: {
-        slot: 'Gesicht Abends (Di / Do / So – BHA-Abend) + optional Kopfhaut Pre-Wash',
-        advice: 'Auf T-Zone/Poren auftragen, 5–10 Min. einwirken lassen, danach leichtes Creme-Gel.',
-        existingMatch: 'Im Bestand: Balea Beauty Expert Liquid Peeling 2% BHA.'
+      shower_oil: {
+        slot: 'Körper-Dusche (besonders im Winter bei trockener Haut)',
+        advice: 'Lauwarm (35–37 °C) 5–10 Min. duschen, danach direkt innerhalb von 3 Min. eincremen.',
+        existingMatch: 'Im Bestand: ISANA med Totes Meer Waschlotion (#4) – echtes Duschöl (Öl auf Platz 1) ist ein gutes Winter-Upgrade.'
       },
       serum: {
-        slot: 'Gesicht Morgens täglich & Abends (Mo / Mi / Fr / Sa)',
+        slot: flags.keratolytic.length
+          ? 'Gesicht Abends (Spot auf geschlossene Schuppen/Bartansatz) & Plaque Schicht 1'
+          : 'Gesicht Morgens & Abends (Schritt 2 – ganzes Gesicht & Bartansatz)',
+        advice: flags.stingTriggers.length
+          ? 'Auf leicht feuchte, geschlossene Haut geben. Bei offenen Rissen/Rhagaden pausieren (Stinging-Gefahr)!'
+          : '2–3 Tropfen auf leicht feuchte Haut auftragen – stärkt die Barriere gegen den Koebner-Effekt.',
+        existingMatch: flags.keratolytic.length
+          ? 'Im Bestand: ISANA med 5% Urea Akut-Pflege Serum (#2).'
+          : 'Im Bestand: ISANA Calming Barrier Serum (#1).'
+      },
+      moisturizer: {
+        slot: flags.heavyLipidHigh.length
+          ? 'Gesicht Abends (Schritt 3 – Winter/Nacht) & brennfreie SOS-Pflege'
+          : 'Gesicht Abends (Schritt 3 – leichte Nachtpflege)',
+        advice: 'Erbsengroße Menge über dem Serum auftragen. Morgens unter deinem LSF-50-Fluid meist nicht extra nötig.',
+        existingMatch: 'Im Bestand: Balea med Gesichtscreme Ultra Sensitive (#12), Mixa Panthenol Comfort (#13) & Reserve ISANA med Panthenol Komfort (#14).'
+      },
+      sunscreen: {
+        slot: 'Gesicht Morgens (Schritt 3+4 als 2-in-1 Tagespflege + UV-Schutz)',
+        advice: 'Großzügig auftragen – verhindert Sonnenbrand-Trigger (Koebner-Effekt). Abends sanft abwaschen.',
+        existingMatch: 'Im Bestand: ISANA Anti-UV Tagesfluid LSF 50 (#3).'
+      },
+      body_lotion: {
+        slot: 'Körper täglich nach dem Duschen (Soak & Seal innerhalb von 3 Min.)',
+        advice: flags.stingTriggers.length
+          ? 'Ideal für geschlossene, schuppige Körperareale. Bei aufgekratzten Stellen auf brennfreie Pflege wechseln.'
+          : 'Perfekt für die tägliche Basistherapie – auch auf gereizter Haut brennfrei nutzbar.',
+        existingMatch: 'Im Bestand: ISANA med Barriereschutz Lotion (#5), Totes Meer Lotion (#6) & Mixa Panthenol Comfort (#13).'
+      },
+      ointment: {
+        slot: 'Plaque-Intensivpflege Abends/Nachts (Schicht 2 – Okklusion / „Slugging“)',
+        advice: 'Über dem 5% Urea Serum auf Ellbogen/Knie/Schienbeine auftragen – oder solo bei offenen, rissigen Herden.',
+        existingMatch: 'Im Bestand: ISANA med Totes Meer Salbe (#7) & Mixa Panthenol Comfort (#13 tagsüber).'
+      },
+      exfoliant: {
+        slot: 'Spezial-Behandlung bei dicken, geschlossenen Schuppenpanzern (2–3x/Woche abends)',
+        advice: 'Strikt nur auf geschlossene Plaques! Nicht mit Urea am selben Abend kombinieren. Danach versiegeln & morgens LSF 50 nutzen.',
+        existingMatch: 'Im Bestand: Neutrogena 2% BHA Waschgel (#11 als 3-Min-Dusch-Trick) / Nachkauf: ISANA 6% AHA.'
+      },
+      shampoo: {
+        slot: flags.soothing.some((s) => /piroctone/i.test(s))
+          ? 'Kopfhaut 2–3x/Woche bei Schuppung/Juckreiz (2–3 Min. einwirken lassen)'
+          : 'Kopfhaut Alltag (milde Wäsche an den Zwischentagen)',
+        advice: 'Mit den Fingerkuppen sanft einmassieren, niemals mit den Fingernägeln kratzen.',
+        existingMatch: 'Im Bestand: ISANA med Anti-Schuppen (#8), Ultra Sensitiv (#9) & pH 5,5 (#10).'
+      },
+      lip_balm: {
+        slot: 'Lippenpflege nach Bedarf (tagsüber / draußen)',
+        advice: 'Reizfreie Lippenpflege schützt vor Einrissen und UV-Stress an den Lippen.',
+        existingMatch: 'Gut kombinierbar mit deiner täglichen Routine.'
+      }
+    };
+    if (alexMap[detectedCategory]) return alexMap[detectedCategory];
+  }
+
+  // Spezifischer Plan für Fettige Haut / Seborrhoe / Locken
+  if (skinType === 'oily' || hasCond('seborrhoe') || hasCond('curly_oily')) {
+    const partnerMap = {
+      cleanser: {
+        slot: 'Gesicht Morgens & Abends (Schritt 2 im Double Cleansing)',
+        advice: 'Sanft 30 Sek. reinigen. Abends nach einem Reinigungsöl anwenden, um UV-Filter & Sebum zu lösen.',
+        existingMatch: 'dm-Plan: Balea MED Ultra Sensitive Waschgel.'
+      },
+      exfoliant: {
+        slot: 'Gesicht Abends (2–3x/Woche) + optional Kopfhaut Pre-Wash',
+        advice: 'Auf T-Zone/Poren auftragen, 5–10 Min. einwirken lassen, danach leichtes Creme-Gel.',
+        existingMatch: 'dm-Plan: Balea Beauty Expert Liquid Peeling 2% BHA.'
+      },
+      serum: {
+        slot: 'Gesicht Morgens täglich & Abends an BHA-freien Tagen',
         advice: '3–4 Tropfen auf leicht feuchte Haut vor dem Sonnenschutz bzw. Creme-Gel.',
-        existingMatch: 'Ziel-Slot: Balea Beauty Expert Azelain Booster / Niacinamide Serum.'
+        existingMatch: 'dm-Plan: Balea Beauty Expert Azelain Booster / Niacinamide Serum.'
       },
       sunscreen: {
         slot: 'Gesicht Morgens – ALLEINIGE Tagespflege (keine Creme darunter!)',
-        advice: '2 Fingerlängen auftragen; schützt vor Sebum-Oxidation und dunklen Pickelmalen (PIH). Abends per Double Cleansing entfernen.',
-        existingMatch: 'Im Bestand: SUNDANCE 50+ Sensitiv Sonnenfluid.'
+        advice: '2 Fingerlängen auftragen; schützt vor Sebum-Oxidation und Pickelmalen (PIH). Abends per Double Cleansing entfernen.',
+        existingMatch: 'dm-Plan: SUNDANCE 50+ Sensitiv Sonnenfluid.'
       },
       moisturizer: {
-        slot: 'Gesicht Abends (Schritt 4 – leichter Abschluss)',
-        advice: 'Erbsengroße Menge abends über dem Serum/BHA. Morgens unter LSF 50+ weglassen.',
-        existingMatch: 'Ziel-Slot: Balea Aqua Feuchtigkeits Creme-Gel.'
+        slot: 'Gesicht Abends (leichter Abschluss)',
+        advice: 'Erbsengroße Menge abends über dem Serum. Morgens unter LSF 50+ weglassen.',
+        existingMatch: 'dm-Plan: Balea Aqua Feuchtigkeits Creme-Gel.'
       },
       shampoo: {
         slot: 'Haare Waschtag (alle 2–3 Tage) – CWC-Methode NUR auf die Kopfhaut!',
-        advice: 'Vorher Spitzen mit Spülung schützen (C1), dann Shampoo 60 Sek. nur am fettigen Ansatz einmassieren.',
-        existingMatch: 'Im Bestand: Balea Pure Frische Shampoo ↔ Aqua Hyaluron Shampoo.'
+        advice: 'Vorher trockene Spitzen mit Spülung schützen (C1), dann Shampoo nur am Ansatz einmassieren.',
+        existingMatch: 'dm-Plan: Balea Pure Frische ↔ Aqua Hyaluron Shampoo.'
       },
       conditioner: {
         slot: 'Haare – strikt ab Ohrhöhe abwärts (Längen & trockene Spitzen)',
-        advice: 'Niemals an den fettigen Ansatz geben! Ideal für C1 (Spitzenschutz) & C2 (Squish to Condish).',
-        existingMatch: 'Im Bestand: Balea Prof. Aqua Hyaluron Serie / Langhaarmädchen Lockengel.'
+        advice: 'Niemals an den fettigen Ansatz geben! Ideal für C1 (Spitzenschutz) & C2.',
+        existingMatch: 'dm-Plan: Balea Prof. Aqua Hyaluron Serie / Langhaarmädchen Lockengel.'
       }
     };
-    return map[detectedCategory] || {
-      slot: 'Ergänzende Pflege',
-      advice: 'Sparsam testen und auf Glanzbildung / Komedogenität achten.',
-      existingMatch: 'Prüfe, ob ein leichtes Produkt aus deinem dm-Plan den Schritt schon abdeckt.'
-    };
+    if (partnerMap[detectedCategory]) return partnerMap[detectedCategory];
   }
 
-  // --- ALEX (Psoriasis vulgaris + Normaler Hauttyp) ---
-  if (alexScore < 55) {
-    return {
-      slot: 'Nicht für deinen Psoriasis-Pflegeplan empfohlen',
-      advice: 'Enthält Red-Flag-Inhaltsstoffe (z. B. Duftstoffe, viel Alkohol, ätherische Öle oder mechanische Peelings), die Reizungen oder neue Plaques (Koebner-Effekt) auslösen können.',
-      existingMatch: 'Dein bestehender 14-Produkte-Bestand deckt bereits alle Pflegeschritte reizfrei ab.'
-    };
-  }
-
-  const alexMap = {
-    cleanser: {
-      slot: 'Gesicht AM/PM (Schritt 1) oder Körper-Dusche',
-      advice: 'Lauwarm reinigen, danach nur trocken tupfen (nicht rubbeln!) und innerhalb von 3 Minuten eincremen (Soak & Seal).',
-      existingMatch: 'Im Bestand: ISANA med Ultra Sensitiv Totes Meer Waschlotion (#4).'
-    },
-    shower_oil: {
-      slot: 'Körper-Dusche (besonders im Winter bei trockener Haut)',
-      advice: 'Lauwarm (35–37 °C) 5–10 Min. duschen, danach direkt innerhalb von 3 Min. eincremen.',
-      existingMatch: 'Im Bestand: ISANA med Totes Meer Waschlotion (#4) – ein echtes Duschöl (Öl auf Platz 1) ist ein tolles Winter-Upgrade.'
-    },
-    serum: {
-      slot: flags.keratolytic.length
-        ? 'Gesicht Abends (Spot auf geschlossene Schuppen/Bartansatz) & Plaque Schicht 1'
-        : 'Gesicht Morgens & Abends (Schritt 2 – ganzes Gesicht & Bartansatz)',
-      advice: flags.stingTriggers.length
-        ? 'Auf leicht feuchte, geschlossene Haut geben. Bei offenen Rissen/Rhagaden pausieren (Stinging-Gefahr)!'
-        : '2–3 Tropfen auf leicht feuchte Haut auftragen – stärkt die Barriere und schützt vor dem Koebner-Effekt.',
-      existingMatch: flags.keratolytic.length
-        ? 'Im Bestand: ISANA med 5% Urea Akut-Pflege Serum (#2).'
-        : 'Im Bestand: ISANA Calming Barrier Serum (#1).'
-    },
-    moisturizer: {
-      slot: flags.heavyLipidHigh.length
-        ? 'Gesicht Abends (Schritt 3 – Winter/Nacht) & brennfreie SOS-Pflege'
-        : 'Gesicht Abends (Schritt 3 – leichte Nachtpflege für normale Haut)',
-      advice: 'Erbsengroße Menge über dem Serum auftragen. Morgens unter deinem LSF-50-Fluid meist nicht extra nötig.',
-      existingMatch: 'Im Bestand: Balea med Gesichtscreme Ultra Sensitive (#12), Mixa Panthenol Comfort (#13) & Reserve ISANA med Panthenol Komfort (#14).'
-    },
-    sunscreen: {
-      slot: 'Gesicht Morgens (Schritt 3+4 als 2-in-1 Tagespflege + UV-Schutz)',
-      advice: 'Großzügig auftragen – verhindert Sonnenbrand-Trigger (Koebner-Effekt). Abends sanft abwaschen.',
-      existingMatch: 'Im Bestand: ISANA Anti-UV Tagesfluid LSF 50 (#3).'
-    },
-    body_lotion: {
-      slot: 'Körper täglich nach dem Duschen (Soak & Seal innerhalb von 3 Min.)',
-      advice: flags.stingTriggers.length
-        ? 'Ideal für geschlossene, schuppige Körperareale. Bei aufgekratzten Stellen auf brennfreie Pflege wechseln.'
-        : 'Perfekt für die tägliche Basistherapie – auch auf gereizter oder juckender Haut brennfrei nutzbar.',
-      existingMatch: 'Im Bestand: ISANA med Barriereschutz Lotion (#5), Totes Meer Lotion (#6) & Mixa Panthenol Comfort (#13).'
-    },
-    ointment: {
-      slot: 'Plaque-Intensivpflege Abends/Nachts (Schicht 2 – Okklusion / „Slugging“)',
-      advice: 'Über dem 5% Urea Serum auf Ellbogen/Knie/Schienbeine auftragen – oder solo bei offenen, rissigen Herden.',
-      existingMatch: 'Im Bestand: ISANA med Totes Meer Salbe (#7) & Mixa Panthenol Comfort (#13 tagsüber).'
-    },
-    exfoliant: {
-      slot: 'Spezial-Behandlung bei dicken, geschlossenen Schuppenpanzern (2–3x/Woche abends)',
-      advice: 'Strikt nur auf geschlossene Plaques! Nicht mit Urea am selben Abend kombinieren. Danach dick versiegeln & morgens LSF 50 nutzen.',
-      existingMatch: 'Im Bestand: Neutrogena 2% BHA Waschgel (#11 als 3-Min-Dusch-Trick) / Nachkauf-Option: ISANA 6% AHA.'
-    },
-    shampoo: {
-      slot: flags.soothing.some((s) => /piroctone/i.test(s))
-        ? 'Kopfhaut 2–3x/Woche bei Schuppung/Juckreiz (2–3 Min. einwirken lassen)'
-        : 'Kopfhaut Alltag (milde Wäsche an den Zwischentagen)',
-      advice: 'Mit den Fingerkuppen sanft einmassieren, niemals mit den Fingernägeln kratzen (Koebner-Schutz).',
-      existingMatch: 'Im Bestand: ISANA med Anti-Schuppen (#8), Ultra Sensitiv (#9) & pH 5,5 (#10).'
-    },
-    lip_balm: {
-      slot: 'Lippenpflege nach Bedarf (tagsüber / draußen)',
-      advice: 'Reizfreie Lippenpflege schützt vor Einrissen und UV-Stress an den Lippen.',
-      existingMatch: 'Gut kombinierbar mit deiner täglichen Routine (ohne Konflikt zu den 14 Bestandsprodukten).'
-    }
+  // Allgemeine Pflegeplan-Zuordnung für alle anderen Kombinationen
+  const generalMap = {
+    cleanser: { slot: 'Morgens & Abends – Schritt 1 (Reinigung)', advice: 'Lauwarm reinigen und sanft trocken tupfen.', existingMatch: 'Basis-Schritt jeder Routine.' },
+    serum: { slot: 'Morgens und/oder Abends – Schritt 2 (Wirkstoff-Serum)', advice: 'Auf leicht feuchte Haut auftragen und danach mit Creme oder LSF einschließen.', existingMatch: 'Gezielte Wirkstoff-Ergänzung.' },
+    moisturizer: { slot: 'Morgens (unter LSF) und/oder Abends – Schritt 3 (Pflege)', advice: 'Je nach Hautgefühl dünn auftragen – bei trockener Haut ggf. abends etwas reichhaltiger.', existingMatch: 'Tägliche Barriere- und Feuchtigkeitspflege.' },
+    sunscreen: { slot: 'Morgens – letzter Schritt (UV-Schutz)', advice: 'Großzügig auftragen (ca. 2 Fingerlängen fürs Gesicht), abends gründlich abwaschen.', existingMatch: 'Wichtigster Schutz gegen Hautalterung, Rötungen & Pigmentflecken.' },
+    exfoliant: { slot: 'Abends – 1–3x pro Woche (Chemisches Peeling)', advice: 'Langsam einschleichen, nicht mit anderen Säuren kombinieren und tagsüber LSF 50 nutzen.', existingMatch: 'Aktiv-Behandlung nach Bedarf.' },
+    body_lotion: { slot: 'Körper – direkt nach dem Duschen (Soak & Seal)', advice: 'Auf noch leicht feuchter Haut eincremen, um Feuchtigkeit einzuschließen.', existingMatch: 'Tägliche Körper-Basistherapie.' },
+    ointment: { slot: 'Punktuell Abends / auf sehr trockenen Stellen', advice: 'Versiegelt Feuchtigkeit über Nacht und schützt rissige Areale.', existingMatch: 'Intensiv- & SOS-Pflege.' },
+    shampoo: { slot: 'Haarwäsche (Kopfhaut)', advice: 'Sanft mit den Fingerkuppen einmassieren und lauwarm ausspülen.', existingMatch: 'Kopfhautpflege.' },
+    conditioner: { slot: 'Haarlängen & Spitzen (nach dem Waschen)', advice: 'Nur in die Längen und Spitzen geben, Ansatz aussparen.', existingMatch: 'Haarpflege.' },
+    lip_balm: { slot: 'Lippenpflege nach Bedarf', advice: 'Mehrmals täglich und bei Sonne/Kälte anwenden.', existingMatch: 'Alltags-Schutz.' }
   };
 
-  return alexMap[detectedCategory] || {
+  return generalMap[detectedCategory] || {
     slot: 'Ergänzende Hautpflege (nach Bedarf)',
-    advice: 'Zuerst kleinflächig testen und die 5 Goldenen Psoriasis-Regeln beachten.',
-    existingMatch: 'Prüfe im Tab „Pflegeplan“, ob eines deiner 14 Bestandsprodukte diesen Zweck schon erfüllt.'
+    advice: 'Zuerst kleinflächig testen und gut beobachten, wie deine Haut reagiert.',
+    existingMatch: 'Individuelle Ergänzung.'
   };
 }

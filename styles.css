@@ -169,6 +169,72 @@ html, body {
   color: var(--text-muted);
 }
 
+/* Skin Profile Selector */
+.profile-selector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.preset-pills {
+  display: flex;
+  gap: 6px;
+}
+
+.preset-btn {
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--primary-dark);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.preset-btn.active {
+  background: var(--primary);
+  color: #FFFFFF;
+  border-color: var(--primary);
+}
+
+.condition-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.cond-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #FAFBF9;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.cond-chip input {
+  accent-color: var(--primary);
+  margin: 0;
+  width: 15px;
+  height: 15px;
+}
+
+.cond-chip.checked {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
 /* Mode tabs */
 .input-mode-tabs {
   display: grid;
