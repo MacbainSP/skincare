@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1E5F54" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>SkinCheck – INCI Scanner &amp; Pflegeplan</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Top App Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-mark" aria-hidden="true">SC</div>
+        <div>
+          <h1 class="app-title">SkinCheck</h1>
+          <p class="app-subtitle" id="header-profile-label">Profil: Alex (Psoriasis + Normal)</p>
+        </div>
+      </div>
+      <button class="profile-chip" id="quick-profile-switch" type="button" title="Profil wechseln">
+        <span id="profile-chip-text">Alex</span>
+        <span class="chip-swap" aria-hidden="true">⇄</span>
+      </button>
+    </header>
+
+    <!-- Main Scrollable Content -->
+    <main class="app-main">
+      <!-- VIEW 1: SCAN -->
+      <section id="view-scan" class="view active" aria-label="Produkt scannen">
+        <div class="card hero-card">
+          <div class="input-mode-tabs" role="tablist">
+            <button class="mode-tab active" data-mode="photo" role="tab" aria-selected="true">📷 Foto</button>
+            <button class="mode-tab" data-mode="link" role="tab" aria-selected="false">🔗 Link</button>
+            <button class="mode-tab" data-mode="text" role="tab" aria-selected="false">📝 INCI-Text</button>
+          </div>
+
+          <!-- Mode: Photo -->
+          <div id="panel-photo" class="mode-panel active">
+            <p class="helper-text">
+              Fotografiere die <strong>INCI-Liste</strong> auf der Rückseite des Produkts (oder wähle ein Foto aus der Galerie).
+            </p>
+            <div class="photo-actions">
+              <label class="btn btn-primary btn-large" for="input-camera">
+                <span>📸 Kamera öffnen</span>
+                <input id="input-camera" type="file" accept="image/*" capture="environment" hidden />
+              </label>
+              <label class="btn btn-secondary" for="input-gallery">
+                <span>🖼️ Galerie</span>
+                <input id="input-gallery" type="file" accept="image/*" hidden />
+              </label>
+            </div>
+            <div id="photo-preview-wrap" class="photo-preview-wrap hidden">
+              <img id="photo-preview" alt="Vorschau des Produktfotos" />
+              <div class="photo-preview-actions">
+                <button id="btn-analyze-photo" class="btn btn-primary" type="button">✨ Foto analysieren</button>
+                <button id="btn-clear-photo" class="btn btn-ghost" type="button">Verwerfen</button>
+              </div>
+            </div>
+            <p class="hint-small" id="photo-api-hint">
+              Für die automatische Foto-Texterkennung wird dein Gemini API-Key aus den Einstellungen genutzt.
+            </p>
+          </div>
+
+          <!-- Mode: Link -->
+          <div id="panel-link" class="mode-panel">
+            <p class="helper-text">
+              Füge einen Produkt-Link von <strong>Rossmann, dm, Müller, Apotheke</strong> o. Ä. ein.
+            </p>
+            <div class="field-group">
+              <input id="input-url" type="url" class="text-input" placeholder="https://www.rossmann.de/de/..." autocomplete="off" />
+            </div>
+            <button id="btn-analyze-url" class="btn btn-primary btn-full" type="button">🔍 Link auslesen &amp; analysieren</button>
+            <p class="hint-small">
+              Nutzt den lokalen Python-Proxy (für Rossmann/dm ohne CORS-Blockade) und/oder Gemini-Suche.
+            </p>
+          </div>
+
+          <!-- Mode: Text -->
+          <div id="panel-text" class="mode-panel">
+            <div class="field-group">
+              <label class="field-label" for="input-product-name">Produktname (optional)</label>
+              <input id="input-product-name" type="text" class="text-input" placeholder="z. B. ISANA med Akut-Pflege Serum 5% Urea" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="input-product-category">Produktkategorie (optional, sonst automatisch)</label>
+              <select id="input-product-category" class="text-input">
+                <option value="auto">Automatisch erkennen</option>
+                <option value="cleanser">Gesichtsreinigung / Waschlotion</option>
+                <option value="serum">Serum / Konzentrat</option>
+                <option value="moisturizer">Gesichtscreme / Fluid</option>
+                <option value="sunscreen">Sonnenschutz (LSF)</option>
+                <option value="body_lotion">Körperlotion / Körpercreme</option>
+                <option value="ointment">Plaque-Salbe / Intensivpflege</option>
+                <option value="shower_oil">Duschöl / Duschgel</option>
+                <option value="exfoliant">Chemisches Peeling (AHA/BHA/PHA)</option>
+                <option value="shampoo">Shampoo / Kopfhaut</option>
+                <option value="conditioner">Spülung / Haarmaske / Styling</option>
+                <option value="lip_balm">Lippenpflege</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="input-inci">INCI-Liste (kommagetrennt)</label>
+              <textarea id="input-inci" class="text-area" rows="5" placeholder="Aqua, Glycerin, Urea, Panthenol, Caprylic/Capric Triglyceride, ..."></textarea>
+            </div>
+            <button id="btn-analyze-text" class="btn btn-primary btn-full" type="button">🧪 Inhaltsstoffe analysieren</button>
+            <div class="sample-row">
+              <span class="hint-small">Schnelltest:</span>
+              <button class="chip-btn" type="button" data-sample="urea_serum">5% Urea Serum</button>
+              <button class="chip-btn" type="button" data-sample="bad_cream">Duft-Alkohol-Creme</button>
+              <button class="chip-btn" type="button" data-sample="bha_peeling">2% BHA Peeling</button>
+              <button class="chip-btn" type="button" data-sample="lip_sunozon">sunozon Lippen LSF 50</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Status / Loading Banner -->
+        <div id="status-banner" class="status-banner hidden" role="status">
+          <div class="spinner"></div>
+          <span id="status-text">Analysiere Produkt…</span>
+        </div>
+
+        <!-- Error Banner -->
+        <div id="error-banner" class="error-banner hidden" role="alert"></div>
+
+        <!-- Analysis Result Container -->
+        <div id="result-container" class="result-container hidden"></div>
+      </section>
+
+      <!-- VIEW 2: PFLEGEPLAN -->
+      <section id="view-plan" class="view" aria-label="Pflegeplan">
+        <div class="segment-control">
+          <button class="segment-btn active" data-plan-profile="alex" type="button">Alex (Psoriasis)</button>
+          <button class="segment-btn" data-plan-profile="partner" type="button">Freundin (Fettig &amp; Locken)</button>
+        </div>
+        <div id="plan-content"></div>
+      </section>
+
+      <!-- VIEW 3: VERLAUF -->
+      <section id="view-history" class="view" aria-label="Scan-Verlauf">
+        <div class="section-header-row">
+          <h2>Gespeicherte Analysen</h2>
+          <button id="btn-clear-history" class="btn btn-ghost btn-sm" type="button">Alle löschen</button>
+        </div>
+        <div id="history-list"></div>
+      </section>
+
+      <!-- VIEW 4: EINSTELLUNGEN -->
+      <section id="view-settings" class="view" aria-label="Einstellungen">
+        <div class="card">
+          <h2>Aktives Standard-Profil</h2>
+          <div class="field-group">
+            <label class="radio-card">
+              <input type="radio" name="default-profile" value="alex" checked />
+              <div>
+                <strong>Alex – Normaler Hauttyp + Psoriasis vulgaris</strong>
+                <p class="hint-small">Zonen-Management, 14 Bestandsprodukte (ISANA / Mixa / Balea med), strikt parfümfrei.</p>
+              </div>
+            </label>
+            <label class="radio-card">
+              <input type="radio" name="default-profile" value="partner" />
+              <div>
+                <strong>Freundin – Fettige Haut (Seborrhoe) &amp; dunkle Locken</strong>
+                <p class="hint-small">Leichte, nicht-komedogene Pflege, Double Cleansing, BHA/Azelain &amp; CWC-Haarroutine (dm).</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Gemini KI-Anbindung (Foto-Scan &amp; Link-Analyse)</h2>
+          <p class="helper-text">
+            Dein API-Key wird ausschließlich lokal auf deinem Gerät (<code>localStorage</code>) gespeichert. Du bekommst ihn kostenlos in Google AI Studio.
+          </p>
+          <div class="field-group">
+            <label class="field-label" for="input-api-key">Gemini API-Key</label>
+            <input id="input-api-key" type="password" class="text-input" placeholder="AIza..." autocomplete="off" />
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="input-gemini-model">Gemini Modell</label>
+            <select id="input-gemini-model" class="text-input">
+              <option value="gemini-2.5-flash">gemini-2.5-flash (Empfohlen – schnell &amp; präzise)</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash (Alternative)</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (Maximale Tiefe)</option>
+            </select>
+          </div>
+          <div class="button-row">
+            <button id="btn-save-settings" class="btn btn-primary" type="button">💾 Speichern</button>
+            <button id="btn-test-api" class="btn btn-secondary" type="button">🔌 Verbindung testen</button>
+          </div>
+          <p id="settings-feedback" class="hint-small"></p>
+        </div>
+
+        <div class="card">
+          <h2>Als Android-App installieren (PWA)</h2>
+          <ol class="install-steps">
+            <li>Öffne diese Seite in <strong>Google Chrome</strong> auf deinem Android-Handy.</li>
+            <li>Tippe oben rechts auf das <strong>⋮ Menü</strong>.</li>
+            <li>Wähle <strong>„Zum Startbildschirm hinzufügen“</strong> bzw. <strong>„App installieren“</strong>.</li>
+            <li>Fertig – SkinCheck startet ab sofort im Vollbild mit eigenem App-Icon und funktioniert für Text-Analysen &amp; Pflegeplan sogar offline.</li>
+          </ol>
+          <button id="btn-install-pwa" class="btn btn-primary btn-full hidden" type="button">📲 Jetzt als App installieren</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Navigation (Android Style) -->
+    <nav class="bottom-nav" aria-label="Hauptnavigation">
+      <button class="nav-item active" data-view="scan" type="button">
+        <span class="nav-icon">📷</span>
+        <span class="nav-label">Scanner</span>
+      </button>
+      <button class="nav-item" data-view="plan" type="button">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">Pflegeplan</span>
+      </button>
+      <button class="nav-item" data-view="history" type="button">
+        <span class="nav-icon">🕘</span>
+        <span class="nav-label">Verlauf</span>
+      </button>
+      <button class="nav-item" data-view="settings" type="button">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">Setup</span>
+      </button>
+    </nav>
+  </div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
