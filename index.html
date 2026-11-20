@@ -183,8 +183,19 @@
         <div class="card">
           <h2>Gemini KI-Anbindung (Foto-Scan &amp; Link-Analyse)</h2>
           <p class="helper-text">
-            Dein API-Key wird ausschließlich lokal auf deinem Gerät (<code>localStorage</code>) gespeichert. Du bekommst ihn kostenlos in Google AI Studio.
+            Dein API-Key wird ausschließlich lokal auf deinem Gerät (<code>localStorage</code>) gespeichert und niemals übertragen.
           </p>
+          <details class="api-guide-details" open>
+            <summary style="font-weight:700; font-size:13.5px; color:var(--primary-dark); cursor:pointer; margin-bottom:8px;">
+              🔑 So bekommst du deinen kostenlosen API-Key
+            </summary>
+            <ol class="install-steps">
+              <li>Öffne <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--primary); font-weight:700;">aistudio.google.com/apikey ↗</a> und melde dich mit deinem Google-Konto an.</li>
+              <li>Klicke auf <strong>„Create API key“</strong> (ggf. ein neues kostenloses Projekt bestätigen).</li>
+              <li>Kopiere den Schlüssel (beginnt mit <code>AIza...</code>) und füge ihn unten ein.</li>
+              <li>Tippe auf <strong>„🔌 Testen / Auto-Wahl“</strong> – die App wählt automatisch ein passendes kostenloses Flash-Modell.</li>
+            </ol>
+          </details>
           <div class="field-group">
             <label class="field-label" for="input-api-key">Gemini API-Key</label>
             <input id="input-api-key" type="password" class="text-input" placeholder="AIza..." autocomplete="off" />
